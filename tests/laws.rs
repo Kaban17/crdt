@@ -27,11 +27,7 @@ fn assert_associative<T: JoinSemilattice + std::fmt::Debug>(a: &T, b: &T, c: &T)
 }
 
 fn assert_commutative<T: JoinSemilattice + std::fmt::Debug>(a: &T, b: &T) {
-    assert_eq!(
-        a.clone().joined(b),
-        b.clone().joined(a),
-        "a ⊔ b ≠ b ⊔ a"
-    );
+    assert_eq!(a.clone().joined(b), b.clone().joined(a), "a ⊔ b ≠ b ⊔ a");
 }
 
 fn assert_idempotent<T: JoinSemilattice + std::fmt::Debug>(a: &T) {
@@ -129,8 +125,16 @@ lattice_laws!(lww_register_laws, common::lww_register());
 lattice_laws!(orset_laws, common::orset());
 
 inflation_law!(vclock_inflation, common::vclock(), common::vclock_op());
-inflation_law!(gcounter_inflation, common::gcounter(), common::gcounter_op());
-inflation_law!(pncounter_inflation, common::pncounter(), common::pncounter_op());
+inflation_law!(
+    gcounter_inflation,
+    common::gcounter(),
+    common::gcounter_op()
+);
+inflation_law!(
+    pncounter_inflation,
+    common::pncounter(),
+    common::pncounter_op()
+);
 inflation_law!(gset_inflation, common::gset(), common::gset_op());
 inflation_law!(lww_inflation, common::lww_register(), common::lww_op());
 inflation_law!(orset_inflation, common::orset(), common::orset_op());

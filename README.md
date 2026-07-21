@@ -26,12 +26,17 @@ Shapiro et al., 2011).
   может (сами уравнения), проверяется обобщёнными proptest-тестами, написанными
   один раз для любого `T: JoinSemilattice` и инстанцируемыми макросом
   (`tests/laws.rs`). Новый CRDT подключается к проверке одной строкой.
+- **Операции — ассоциированным типом.** Трейт `Update` (`Op` + `apply`)
+  обобщает второе условие теоремы о сходимости — инфляционность операций
+  (`a ≤ apply(a, op)`) — до одного property-теста на все типы; он же даёт
+  универсальный генератор достижимых состояний: состояние = свёртка списка
+  операций.
 
 ## Структура
 
 | Путь | Содержимое |
 |---|---|
-| `src/lattice.rs` | `JoinSemilattice`, `CvRdt`, `Actor` — ядро |
+| `src/lattice.rs` | `JoinSemilattice`, `Update`, `CvRdt`, `Actor` — ядро |
 | `src/vclock.rs` | векторные часы, `PartialOrd` = «произошло-до» |
 | `src/gcounter.rs` | растущий счётчик |
 | `src/pncounter.rs` | счётчик с декрементом (произведение решёток) |
@@ -49,6 +54,10 @@ cargo test              # все тесты (юнит + property-based + doc-т�
 cargo doc --open        # документация с теоретическими комментариями
 cargo clippy --all-targets
 ```
+
+CI (`.github/workflows/ci.yml`) прогоняет на каждый push и pull request:
+`cargo fmt --check`, `clippy -D warnings`, все тесты, сборку документации
+с `-D warnings`, плюс отдельную job на MSRV (Rust 1.85).
 
 ## Дальнейшая работа
 

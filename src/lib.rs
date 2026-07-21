@@ -41,12 +41,12 @@
 //!
 //! | Модуль | Тип | Класс |
 //! |---|---|---|
-//! | [`vclock`] | [`VClock`](vclock::VClock) | векторные часы (строительный блок) |
-//! | [`gcounter`] | [`GCounter`](gcounter::GCounter) | растущий счётчик |
-//! | [`pncounter`] | [`PnCounter`](pncounter::PnCounter) | счётчик со сложением/вычитанием |
-//! | [`gset`] | [`GSet`](gset::GSet) | растущее множество |
-//! | [`lww`] | [`LwwRegister`](lww::LwwRegister) | регистр «последняя запись побеждает» |
-//! | [`orset`] | [`OrSet`](orset::OrSet) | множество с наблюдаемым удалением (add-wins) |
+//! | [`vclock`] | [`VClock`] | векторные часы (строительный блок) |
+//! | [`gcounter`] | [`GCounter`] | растущий счётчик |
+//! | [`pncounter`] | [`PnCounter`] | счётчик со сложением/вычитанием |
+//! | [`gset`] | [`GSet`] | растущее множество |
+//! | [`lww`] | [`LwwRegister`] | регистр «последняя запись побеждает» |
+//! | [`orset`] | [`OrSet`] | множество с наблюдаемым удалением (add-wins) |
 
 pub mod gcounter;
 pub mod gset;
