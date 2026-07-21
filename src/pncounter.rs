@@ -1,7 +1,16 @@
 //! PN-Counter — счётчик с инкрементом и декрементом.
 
 use crate::gcounter::GCounter;
-use crate::lattice::{Actor, JoinSemilattice};
+use crate::lattice::{Actor, JoinSemilattice, Update};
+
+/// Операция над [`PnCounter`].
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Op<A: Actor> {
+    /// Увеличить счётчик на 1 от имени актора.
+    Inc(A),
+    /// Уменьшить счётчик на 1 от имени актора.
+    Dec(A),
+}
 
 /// Счётчик с увеличением *и* уменьшением.
 ///
@@ -68,6 +77,17 @@ impl<A: Actor> JoinSemilattice for PnCounter<A> {
     fn join(&mut self, other: &Self) {
         self.plus.join(&other.plus);
         self.minus.join(&other.minus);
+    }
+}
+
+impl<A: Actor> Update for PnCounter<A> {
+    type Op = Op<A>;
+
+    fn apply(&mut self, op: Self::Op) {
+        match op {
+            Op::Inc(actor) => self.increment(actor),
+            Op::Dec(actor) => self.decrement(actor),
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 //! LWW-Register — регистр «последняя запись побеждает».
 
-use crate::lattice::{Actor, JoinSemilattice};
+use crate::lattice::{Actor, JoinSemilattice, Update};
 
 /// Регистр, разрешающий конфликты по принципу *last-writer-wins*.
 ///
@@ -80,6 +80,26 @@ impl<A: Actor, T: Ord + Clone> LwwRegister<A, T> {
     /// Ключ сравнения состояний.
     fn key(&self) -> (u64, &A, &T) {
         (self.timestamp, &self.actor, &self.value)
+    }
+}
+
+/// Начальное состояние из значений по умолчанию (метка времени 0).
+///
+/// Нужен обобщённому коду (например, свёртке операций в тестах);
+/// наименьшим элементом решётки в общем случае **не** является,
+/// поскольку `A::default()`/`T::default()` не обязаны быть минимумами.
+impl<A: Actor + Default, T: Ord + Clone + Default> Default for LwwRegister<A, T> {
+    fn default() -> Self {
+        Self::new(A::default(), T::default())
+    }
+}
+
+impl<A: Actor, T: Ord + Clone> Update for LwwRegister<A, T> {
+    /// Операция — тройка «метка времени, актор, значение».
+    type Op = (u64, A, T);
+
+    fn apply(&mut self, (timestamp, actor, value): Self::Op) {
+        self.write(timestamp, actor, value);
     }
 }
 

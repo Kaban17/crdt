@@ -8,14 +8,14 @@
 //! результата от порядка и кратности доставки, т.е. рабочее следствие
 //! законов ACI.
 //!
-//! Также проверяется инфляционность локальных операций: каждая операция
-//! переводит состояние строго «вверх» по выводимому порядку — второе
-//! условие теоремы о сходимости CvRDT.
+//! Инфляционность локальных операций (второе условие теоремы) проверяется
+//! обобщённо в `tests/laws.rs` (макрос `inflation_law!`).
 
 mod common;
 
-use common::{ActorId, SetOp};
-use crdt_lab::{CvRdt, GCounter, JoinSemilattice, OrSet, PnCounter};
+use common::ActorId;
+use crdt_lab::orset::Op as SetOp;
+use crdt_lab::{CvRdt, GCounter, OrSet, PnCounter, Update};
 use proptest::prelude::*;
 
 /// Полный обмен: реплика `i` сливает остальных начиная с `i+1`-й
@@ -83,7 +83,7 @@ proptest! {
     /// SEC для OR-Set: реплики сходятся к одному наблюдаемому множеству.
     #[test]
     fn orset_replicas_converge(
-        ops in proptest::collection::vec((0..3usize, common::set_op()), 0..24)
+        ops in proptest::collection::vec((0..3usize, common::orset_op()), 0..24)
     ) {
         let mut replicas: Vec<OrSet<ActorId, u8>> = vec![OrSet::new(); 3];
         for (replica, op) in ops {
@@ -92,7 +92,7 @@ proptest! {
                 SetOp::Add(_, item) => SetOp::Add(replica as u8, item),
                 remove => remove,
             };
-            common::apply_set_ops(&mut replicas[replica], &[op]);
+            replicas[replica].apply(op);
         }
 
         gossip_everyone(&mut replicas);
@@ -102,28 +102,15 @@ proptest! {
     /// Слияние после слияния ничего не меняет: достигнута неподвижная точка.
     #[test]
     fn merge_is_stable_after_convergence(
-        ops in proptest::collection::vec((0..3usize, common::set_op()), 0..24)
+        ops in proptest::collection::vec((0..3usize, common::orset_op()), 0..24)
     ) {
         let mut replicas: Vec<OrSet<ActorId, u8>> = vec![OrSet::new(); 3];
         for (replica, op) in ops {
-            common::apply_set_ops(&mut replicas[replica], &[op]);
+            replicas[replica].apply(op);
         }
         gossip_everyone(&mut replicas);
         let converged = replicas.clone();
         gossip_everyone(&mut replicas);
         prop_assert_eq!(replicas, converged);
-    }
-
-    /// Локальные операции инфляционны — второе условие теоремы о CvRDT.
-    #[test]
-    fn local_updates_are_inflationary(
-        ops in proptest::collection::vec(common::set_op(), 1..16)
-    ) {
-        let mut set: OrSet<ActorId, u8> = OrSet::new();
-        for op in &ops {
-            let before = set.clone();
-            common::apply_set_ops(&mut set, std::slice::from_ref(op));
-            prop_assert!(before.leq(&set), "операция {op:?} не инфляционна");
-        }
     }
 }

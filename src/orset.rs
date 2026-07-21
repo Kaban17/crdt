@@ -2,7 +2,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::lattice::{Actor, JoinSemilattice};
+use crate::lattice::{Actor, JoinSemilattice, Update};
+
+/// Операция над [`OrSet`].
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Op<A: Actor, T> {
+    /// Вставить элемент от имени актора.
+    Add(A, T),
+    /// Удалить все наблюдаемые вхождения элемента.
+    Remove(T),
+}
 
 /// Уникальная метка события вставки: пара `(актор, порядковый номер)`.
 ///
@@ -132,6 +141,17 @@ impl<A: Actor, T: Ord + Clone> JoinSemilattice for OrSet<A, T> {
         for (actor, &n) in &other.counters {
             let e = self.counters.entry(actor.clone()).or_insert(0);
             *e = (*e).max(n);
+        }
+    }
+}
+
+impl<A: Actor, T: Ord + Clone> Update for OrSet<A, T> {
+    type Op = Op<A, T>;
+
+    fn apply(&mut self, op: Self::Op) {
+        match op {
+            Op::Add(actor, item) => self.add(actor, item),
+            Op::Remove(item) => self.remove(&item),
         }
     }
 }

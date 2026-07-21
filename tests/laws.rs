@@ -11,11 +11,13 @@
 //! * инфляционность слияния (`a ≤ a ⊔ b`) и свойство точной верхней
 //!   грани (`a ≤ c ∧ b ≤ c ⇒ a ⊔ b ≤ c`);
 //! * согласованность выводимого порядка (рефлексивность, транзитивность,
-//!   антисимметричность).
+//!   антисимметричность);
+//! * инфляционность локальных операций (`a ≤ apply(a, op)`) — обобщённо
+//!   через `Update::Op` (макрос `inflation_law!`).
 
 mod common;
 
-use crdt_lab::JoinSemilattice;
+use crdt_lab::{JoinSemilattice, Update};
 use proptest::prelude::*;
 
 fn assert_associative<T: JoinSemilattice + std::fmt::Debug>(a: &T, b: &T, c: &T) {
@@ -54,6 +56,32 @@ fn assert_partial_order<T: JoinSemilattice + std::fmt::Debug>(a: &T, b: &T, c: &
     if a.leq(b) && b.leq(a) {
         assert_eq!(a, b, "порядок не антисимметричен");
     }
+}
+
+/// Инфляционность операции: `a ≤ apply(a, op)` — второе условие
+/// теоремы о сходимости CvRDT, обобщённое благодаря `Update::Op`.
+fn assert_inflationary<T: Update + std::fmt::Debug>(state: &T, op: T::Op)
+where
+    T::Op: std::fmt::Debug + Clone,
+{
+    let mut after = state.clone();
+    after.apply(op.clone());
+    assert!(state.leq(&after), "операция {op:?} не инфляционна");
+}
+
+macro_rules! inflation_law {
+    ($name:ident, $state:expr, $op:expr) => {
+        mod $name {
+            use super::*;
+
+            proptest! {
+                #[test]
+                fn updates_are_inflationary(state in $state, op in $op) {
+                    assert_inflationary(&state, op);
+                }
+            }
+        }
+    };
 }
 
 macro_rules! lattice_laws {
@@ -99,3 +127,10 @@ lattice_laws!(pncounter_laws, common::pncounter());
 lattice_laws!(gset_laws, common::gset());
 lattice_laws!(lww_register_laws, common::lww_register());
 lattice_laws!(orset_laws, common::orset());
+
+inflation_law!(vclock_inflation, common::vclock(), common::vclock_op());
+inflation_law!(gcounter_inflation, common::gcounter(), common::gcounter_op());
+inflation_law!(pncounter_inflation, common::pncounter(), common::pncounter_op());
+inflation_law!(gset_inflation, common::gset(), common::gset_op());
+inflation_law!(lww_inflation, common::lww_register(), common::lww_op());
+inflation_law!(orset_inflation, common::orset(), common::orset_op());

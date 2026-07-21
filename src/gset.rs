@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::lattice::JoinSemilattice;
+use crate::lattice::{JoinSemilattice, Update};
 
 /// Растущее множество: поддерживает только вставку, `join` — объединение.
 ///
@@ -65,6 +65,15 @@ impl<T: Ord + Clone> JoinSemilattice for GSet<T> {
     /// Объединение множеств.
     fn join(&mut self, other: &Self) {
         self.items.extend(other.items.iter().cloned());
+    }
+}
+
+impl<T: Ord + Clone> Update for GSet<T> {
+    /// Операция — вставляемый элемент.
+    type Op = T;
+
+    fn apply(&mut self, item: T) {
+        self.insert(item);
     }
 }
 

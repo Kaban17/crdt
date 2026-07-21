@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::lattice::{Actor, JoinSemilattice};
+use crate::lattice::{Actor, JoinSemilattice, Update};
 
 /// Растущий счётчик: каждая реплика увеличивает только *свою* компоненту,
 /// итоговое значение — сумма всех компонент.
@@ -66,6 +66,15 @@ impl<A: Actor> JoinSemilattice for GCounter<A> {
             let e = self.counts.entry(actor.clone()).or_insert(0);
             *e = (*e).max(n);
         }
+    }
+}
+
+impl<A: Actor> Update for GCounter<A> {
+    /// Операция — пара «актор, величина инкремента».
+    type Op = (A, u64);
+
+    fn apply(&mut self, (actor, amount): Self::Op) {
+        self.increment_by(actor, amount);
     }
 }
 

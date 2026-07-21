@@ -1,10 +1,11 @@
 //! Общие proptest-стратегии: генерация произвольных состояний CRDT
-//! через последовательности допустимых операций.
+//! через последовательности операций трейта `Update`.
 //!
-//! Состояния порождаются только операциями публичного API — тесты
-//! проверяют законы на достижимых состояниях, как и требует теория
-//! (полурешётка нужна на множестве достижимых состояний, а приватность
-//! полей гарантирует, что других не бывает).
+//! Благодаря ассоциированному типу `Update::Op` генерация универсальна:
+//! стратегия операций задаётся один раз на тип, а произвольное
+//! **достижимое** состояние — это свёртка списка операций ([`build`]).
+//! Тесты проверяют законы именно на достижимых состояниях, как и требует
+//! теория, а приватность полей гарантирует, что других не бывает.
 
 // Модуль компилируется в каждый тестовый бинарник отдельно,
 // и каждый использует своё подмножество стратегий.
@@ -12,94 +13,85 @@
 
 use proptest::prelude::*;
 
-use crdt_lab::{GCounter, GSet, LwwRegister, OrSet, PnCounter, VClock};
+use crdt_lab::{orset, pncounter, GCounter, GSet, LwwRegister, OrSet, PnCounter, Update, VClock};
 
 /// Небольшой алфавит акторов: коллизии между репликами вероятны,
 /// что даёт более жёсткую проверку слияния.
 pub type ActorId = u8;
 
-pub fn vclock() -> impl Strategy<Value = VClock<ActorId>> {
-    proptest::collection::vec((0..4u8, 1..8u64), 0..8).prop_map(|ops| {
-        let mut clock = VClock::new();
-        for (actor, times) in ops {
-            for _ in 0..times {
-                clock.increment(actor);
-            }
-        }
-        clock
-    })
+/// Свёртка списка операций в состояние — универсальный генератор
+/// достижимых состояний для любого `T: Update + Default`.
+pub fn build<T: Update + Default>(ops: Vec<T::Op>) -> T {
+    let mut state = T::default();
+    for op in ops {
+        state.apply(op);
+    }
+    state
 }
 
-pub fn gcounter() -> impl Strategy<Value = GCounter<ActorId>> {
-    proptest::collection::vec((0..4u8, 1..20u64), 0..8).prop_map(|ops| {
-        let mut counter = GCounter::new();
-        for (actor, amount) in ops {
-            counter.increment_by(actor, amount);
-        }
-        counter
-    })
+fn states<T: Update + Default + std::fmt::Debug>(
+    op: impl Strategy<Value = T::Op>,
+) -> impl Strategy<Value = T>
+where
+    T::Op: std::fmt::Debug,
+{
+    proptest::collection::vec(op, 0..12).prop_map(build)
 }
 
-pub fn pncounter() -> impl Strategy<Value = PnCounter<ActorId>> {
-    proptest::collection::vec((0..4u8, proptest::bool::ANY), 0..12).prop_map(|ops| {
-        let mut counter = PnCounter::new();
-        for (actor, positive) in ops {
-            if positive {
-                counter.increment(actor);
-            } else {
-                counter.decrement(actor);
-            }
-        }
-        counter
-    })
+// --- Операции ---
+
+pub fn vclock_op() -> impl Strategy<Value = ActorId> {
+    0..4u8
 }
 
-pub fn gset() -> impl Strategy<Value = GSet<u8>> {
-    proptest::collection::btree_set(0..32u8, 0..8).prop_map(|items| {
-        let mut set = GSet::new();
-        for item in items {
-            set.insert(item);
-        }
-        set
-    })
+pub fn gcounter_op() -> impl Strategy<Value = (ActorId, u64)> {
+    (0..4u8, 1..20u64)
 }
 
-pub fn lww_register() -> impl Strategy<Value = LwwRegister<ActorId, i32>> {
-    proptest::collection::vec((0..16u64, 0..4u8, -100..100i32), 0..8).prop_map(|writes| {
-        let mut register = LwwRegister::new(0, 0);
-        for (timestamp, actor, value) in writes {
-            register.write(timestamp, actor, value);
-        }
-        register
-    })
-}
-
-#[derive(Clone, Debug)]
-pub enum SetOp {
-    Add(ActorId, u8),
-    Remove(u8),
-}
-
-pub fn set_op() -> impl Strategy<Value = SetOp> {
+pub fn pncounter_op() -> impl Strategy<Value = pncounter::Op<ActorId>> {
     prop_oneof![
-        (0..4u8, 0..8u8).prop_map(|(actor, item)| SetOp::Add(actor, item)),
-        (0..8u8).prop_map(SetOp::Remove),
+        (0..4u8).prop_map(pncounter::Op::Inc),
+        (0..4u8).prop_map(pncounter::Op::Dec),
     ]
 }
 
-pub fn apply_set_ops(set: &mut OrSet<ActorId, u8>, ops: &[SetOp]) {
-    for op in ops {
-        match *op {
-            SetOp::Add(actor, item) => set.add(actor, item),
-            SetOp::Remove(ref item) => set.remove(item),
-        }
-    }
+pub fn gset_op() -> impl Strategy<Value = u8> {
+    0..32u8
+}
+
+pub fn lww_op() -> impl Strategy<Value = (u64, ActorId, i32)> {
+    (0..16u64, 0..4u8, -100..100i32)
+}
+
+pub fn orset_op() -> impl Strategy<Value = orset::Op<ActorId, u8>> {
+    prop_oneof![
+        (0..4u8, 0..8u8).prop_map(|(actor, item)| orset::Op::Add(actor, item)),
+        (0..8u8).prop_map(orset::Op::Remove),
+    ]
+}
+
+// --- Состояния ---
+
+pub fn vclock() -> impl Strategy<Value = VClock<ActorId>> {
+    states(vclock_op())
+}
+
+pub fn gcounter() -> impl Strategy<Value = GCounter<ActorId>> {
+    states(gcounter_op())
+}
+
+pub fn pncounter() -> impl Strategy<Value = PnCounter<ActorId>> {
+    states(pncounter_op())
+}
+
+pub fn gset() -> impl Strategy<Value = GSet<u8>> {
+    states(gset_op())
+}
+
+pub fn lww_register() -> impl Strategy<Value = LwwRegister<ActorId, i32>> {
+    states(lww_op())
 }
 
 pub fn orset() -> impl Strategy<Value = OrSet<ActorId, u8>> {
-    proptest::collection::vec(set_op(), 0..12).prop_map(|ops| {
-        let mut set = OrSet::new();
-        apply_set_ops(&mut set, &ops);
-        set
-    })
+    states(orset_op())
 }

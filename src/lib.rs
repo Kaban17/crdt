@@ -58,7 +58,7 @@ pub mod vclock;
 
 pub use gcounter::GCounter;
 pub use gset::GSet;
-pub use lattice::{Actor, CvRdt, JoinSemilattice};
+pub use lattice::{Actor, CvRdt, JoinSemilattice, Update};
 pub use lww::LwwRegister;
 pub use orset::OrSet;
 pub use pncounter::PnCounter;

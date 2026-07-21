@@ -1,0 +1,52 @@
+# Непрерывная интеграция: форматирование, линтер, тесты, документация.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Тесты (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Кэш сборки
+        uses: Swatinem/rust-cache@v2
+
+      - name: Форматирование
+        run: cargo fmt --check
+
+      - name: Clippy (предупреждения = ошибки)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Тесты (юнит + property-based + doc)
+        run: cargo test
+
+      - name: Документация (предупреждения = ошибки)
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Проверка на минимальной поддерживаемой версии Rust — полезная строка
+  # в разделе о воспроизводимости.
+  msrv:
+    name: Тесты (MSRV 1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test

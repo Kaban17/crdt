@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::lattice::{Actor, JoinSemilattice};
+use crate::lattice::{Actor, JoinSemilattice, Update};
 
 /// Векторные часы: отображение `актор → счётчик событий`.
 ///
@@ -68,6 +68,15 @@ impl<A: Actor> JoinSemilattice for VClock<A> {
             let e = self.entries.entry(actor.clone()).or_insert(0);
             *e = (*e).max(n);
         }
+    }
+}
+
+impl<A: Actor> Update for VClock<A> {
+    /// Операция — идентификатор актора, зарегистрировавшего событие.
+    type Op = A;
+
+    fn apply(&mut self, actor: A) {
+        self.increment(actor);
     }
 }
 
