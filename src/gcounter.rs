@@ -57,6 +57,11 @@ impl<A: Actor> GCounter<A> {
     pub fn value(&self) -> u64 {
         self.counts.values().sum()
     }
+
+    /// Вклад отдельного актора (0, если актор ещё не наблюдался).
+    pub fn get(&self, actor: &A) -> u64 {
+        self.counts.get(actor).copied().unwrap_or(0)
+    }
 }
 
 impl<A: Actor> JoinSemilattice for GCounter<A> {

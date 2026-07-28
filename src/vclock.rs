@@ -59,6 +59,17 @@ impl<A: Actor> VClock<A> {
     fn dominated_by(&self, other: &Self) -> bool {
         self.entries.iter().all(|(a, &n)| n <= other.get(a))
     }
+
+    /// Произвольный **тотальный** порядок по представлению — для
+    /// канонизации коллекций часов (см. [`MvRegister`](crate::MvRegister)).
+    ///
+    /// С причинным порядком [`PartialOrd`] не связан и потому намеренно
+    /// не выставлен наружу как `Ord`: тотальный `Ord`, противоречащий
+    /// частичному `PartialOrd`, нарушил бы контракт стандартной
+    /// библиотеки — ещё один сюжет о границах системы типов.
+    pub(crate) fn repr_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.entries.cmp(&other.entries)
+    }
 }
 
 impl<A: Actor> JoinSemilattice for VClock<A> {

@@ -70,6 +70,16 @@ impl<A: Actor> PnCounter<A> {
     pub fn value(&self) -> i64 {
         self.plus.value() as i64 - self.minus.value() as i64
     }
+
+    /// Компонента инкрементов (для наблюдения за структурой состояния).
+    pub fn plus(&self) -> &GCounter<A> {
+        &self.plus
+    }
+
+    /// Компонента декрементов (для наблюдения за структурой состояния).
+    pub fn minus(&self) -> &GCounter<A> {
+        &self.minus
+    }
 }
 
 impl<A: Actor> JoinSemilattice for PnCounter<A> {

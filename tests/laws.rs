@@ -122,7 +122,9 @@ lattice_laws!(gcounter_laws, common::gcounter());
 lattice_laws!(pncounter_laws, common::pncounter());
 lattice_laws!(gset_laws, common::gset());
 lattice_laws!(lww_register_laws, common::lww_register());
+lattice_laws!(mvreg_laws, common::mvreg());
 lattice_laws!(orset_laws, common::orset());
+lattice_laws!(orswot_laws, common::orswot());
 
 inflation_law!(vclock_inflation, common::vclock(), common::vclock_op());
 inflation_law!(
@@ -137,4 +139,6 @@ inflation_law!(
 );
 inflation_law!(gset_inflation, common::gset(), common::gset_op());
 inflation_law!(lww_inflation, common::lww_register(), common::lww_op());
+inflation_law!(mvreg_inflation, common::mvreg(), common::mvreg_op());
 inflation_law!(orset_inflation, common::orset(), common::orset_op());
+inflation_law!(orswot_inflation, common::orswot(), common::orset_op());

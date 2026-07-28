@@ -13,7 +13,10 @@
 
 use proptest::prelude::*;
 
-use crdt_lab::{orset, pncounter, GCounter, GSet, LwwRegister, OrSet, PnCounter, Update, VClock};
+use crdt_lab::{
+    orset, pncounter, GCounter, GSet, LwwRegister, MvRegister, OrSet, Orswot, PnCounter, Update,
+    VClock,
+};
 
 /// Небольшой алфавит акторов: коллизии между репликами вероятны,
 /// что даёт более жёсткую проверку слияния.
@@ -63,6 +66,10 @@ pub fn lww_op() -> impl Strategy<Value = (u64, ActorId, i32)> {
     (0..16u64, 0..4u8, -100..100i32)
 }
 
+pub fn mvreg_op() -> impl Strategy<Value = (ActorId, i32)> {
+    (0..4u8, -100..100i32)
+}
+
 pub fn orset_op() -> impl Strategy<Value = orset::Op<ActorId, u8>> {
     prop_oneof![
         (0..4u8, 0..8u8).prop_map(|(actor, item)| orset::Op::Add(actor, item)),
@@ -92,6 +99,15 @@ pub fn lww_register() -> impl Strategy<Value = LwwRegister<ActorId, i32>> {
     states(lww_op())
 }
 
+pub fn mvreg() -> impl Strategy<Value = MvRegister<ActorId, i32>> {
+    states(mvreg_op())
+}
+
 pub fn orset() -> impl Strategy<Value = OrSet<ActorId, u8>> {
+    states(orset_op())
+}
+
+/// ORSWOT использует тот же алфавит операций, что и OR-Set.
+pub fn orswot() -> impl Strategy<Value = Orswot<ActorId, u8>> {
     states(orset_op())
 }

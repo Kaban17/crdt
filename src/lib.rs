@@ -35,7 +35,10 @@
 //!    рассогласование порядка и слияния;
 //! 3. **Статические гарантии**: параметризация идентификатором реплики
 //!    (`A: Actor`) и владение (`&mut self` / `&Self`) не позволяют смешать
-//!    состояния разных типов или изменить чужую реплику при слиянии.
+//!    состояния разных типов или изменить чужую реплику при слиянии;
+//! 4. **Типизированные инварианты**: протокольные инварианты, невыразимые
+//!    статически (уникальность меток), подняты в API как `Result` —
+//!    трейт [`lattice::ValidateMerge`] с ассоциированным типом ошибки.
 //!
 //! ## Реализованные типы
 //!
@@ -46,20 +49,29 @@
 //! | [`pncounter`] | [`PnCounter`] | счётчик со сложением/вычитанием |
 //! | [`gset`] | [`GSet`] | растущее множество |
 //! | [`lww`] | [`LwwRegister`] | регистр «последняя запись побеждает» |
+//! | [`mvreg`] | [`MvRegister`] | многозначный регистр (конкурентные записи сохраняются) |
 //! | [`orset`] | [`OrSet`] | множество с наблюдаемым удалением (add-wins) |
+//! | [`orswot`] | [`Orswot`] | OR-Set без надгробий (причинный контекст) |
+//! | [`cmrdt`] | [`OpCounter`], [`OpOrSet`] | op-based модель (CmRDT) для сравнения |
 
+pub mod cmrdt;
 pub mod gcounter;
 pub mod gset;
 pub mod lattice;
 pub mod lww;
+pub mod mvreg;
 pub mod orset;
+pub mod orswot;
 pub mod pncounter;
 pub mod vclock;
 
+pub use cmrdt::{CmRdt, OpCounter, OpOrSet};
 pub use gcounter::GCounter;
 pub use gset::GSet;
-pub use lattice::{Actor, CvRdt, JoinSemilattice, Update};
+pub use lattice::{Actor, CvRdt, JoinSemilattice, Update, ValidateMerge};
 pub use lww::LwwRegister;
+pub use mvreg::MvRegister;
 pub use orset::OrSet;
+pub use orswot::Orswot;
 pub use pncounter::PnCounter;
 pub use vclock::VClock;

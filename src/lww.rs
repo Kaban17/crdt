@@ -1,6 +1,8 @@
 //! LWW-Register — регистр «последняя запись побеждает».
 
-use crate::lattice::{Actor, JoinSemilattice, Update};
+use std::fmt;
+
+use crate::lattice::{Actor, JoinSemilattice, Update, ValidateMerge};
 
 /// Регистр, разрешающий конфликты по принципу *last-writer-wins*.
 ///
@@ -64,6 +66,11 @@ impl<A: Actor, T: Ord + Clone> LwwRegister<A, T> {
         self.timestamp
     }
 
+    /// Актор, установивший текущее значение.
+    pub fn actor(&self) -> &A {
+        &self.actor
+    }
+
     /// Записать значение с меткой времени.
     ///
     /// Реализована как `join` с одноэлементным состоянием, поэтому
@@ -109,6 +116,55 @@ impl<A: Actor, T: Ord + Clone> JoinSemilattice for LwwRegister<A, T> {
         if self.key() < other.key() {
             self.clone_from(other);
         }
+    }
+}
+
+/// Нарушение инварианта LWW: пара `(timestamp, actor)` переиспользована
+/// для разных значений.
+///
+/// Протокол LWW предполагает, что метки записей уникальны (каждый актор
+/// не выдаёт один `timestamp` дважды). При нарушении `join` остаётся
+/// корректной операцией полурешётки, но «победитель» выбирается запасным
+/// сравнением значений — то есть произвольно с точки зрения семантики.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MergeError<A: Actor, T: Ord + Clone> {
+    /// Переиспользованная метка времени.
+    pub timestamp: u64,
+    /// Актор, выдавший метку дважды.
+    pub actor: A,
+    /// Противоречащие значения обоих состояний.
+    pub values: (T, T),
+}
+
+impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> fmt::Display for MergeError<A, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "метка (timestamp {}, actor {:?}) переиспользована: значения {:?} и {:?}",
+            self.timestamp, self.actor, self.values.0, self.values.1
+        )
+    }
+}
+
+impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> std::error::Error for MergeError<A, T> {}
+
+impl<A: Actor, T: Ord + Clone> ValidateMerge for LwwRegister<A, T> {
+    type Error = MergeError<A, T>;
+
+    /// Ошибка, если оба состояния несут одну пару `(timestamp, actor)`
+    /// с разными значениями.
+    fn validate_merge(&self, other: &Self) -> Result<(), Self::Error> {
+        if self.timestamp == other.timestamp
+            && self.actor == other.actor
+            && self.value != other.value
+        {
+            return Err(MergeError {
+                timestamp: self.timestamp,
+                actor: self.actor.clone(),
+                values: (self.value.clone(), other.value.clone()),
+            });
+        }
+        Ok(())
     }
 }
 

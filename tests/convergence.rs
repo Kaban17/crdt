@@ -15,7 +15,7 @@ mod common;
 
 use common::ActorId;
 use crdt_lab::orset::Op as SetOp;
-use crdt_lab::{CvRdt, GCounter, OrSet, PnCounter, Update};
+use crdt_lab::{CvRdt, GCounter, OrSet, Orswot, PnCounter, Update};
 use proptest::prelude::*;
 
 /// Полный обмен: реплика `i` сливает остальных начиная с `i+1`-й
@@ -86,6 +86,26 @@ proptest! {
         ops in proptest::collection::vec((0..3usize, common::orset_op()), 0..24)
     ) {
         let mut replicas: Vec<OrSet<ActorId, u8>> = vec![OrSet::new(); 3];
+        for (replica, op) in ops {
+            // метки делаем заведомо уникальными: актор = номер реплики
+            let op = match op {
+                SetOp::Add(_, item) => SetOp::Add(replica as u8, item),
+                remove => remove,
+            };
+            replicas[replica].apply(op);
+        }
+
+        gossip_everyone(&mut replicas);
+        assert_all_equal(&replicas);
+    }
+
+    /// SEC для ORSWOT: сходимость несмотря на нетривиальный `join`
+    /// (метки могут умирать при слиянии) и повторные доставки.
+    #[test]
+    fn orswot_replicas_converge(
+        ops in proptest::collection::vec((0..3usize, common::orset_op()), 0..24)
+    ) {
+        let mut replicas: Vec<Orswot<ActorId, u8>> = vec![Orswot::new(); 3];
         for (replica, op) in ops {
             // метки делаем заведомо уникальными: актор = номер реплики
             let op = match op {

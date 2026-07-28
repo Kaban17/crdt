@@ -1,10 +1,12 @@
 //! OR-Set — множество с наблюдаемым удалением (observed-remove, add-wins).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
-use crate::lattice::{Actor, JoinSemilattice, Update};
+use crate::lattice::{Actor, JoinSemilattice, Update, ValidateMerge};
 
-/// Операция над [`OrSet`].
+/// Операция над [`OrSet`] (и [`Orswot`](crate::Orswot) — общий алфавит
+/// операций позволяет сравнивать реализации на одних историях).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Op<A: Actor, T> {
     /// Вставить элемент от имени актора.
@@ -24,6 +26,26 @@ pub struct Dot<A: Actor> {
     counter: u64,
 }
 
+impl<A: Actor> Dot<A> {
+    /// Конструктор для op-based варианта ([`crate::cmrdt::OpOrSet`]):
+    /// там свежесть метки обеспечивает `prepare`-фаза источника, а не
+    /// этот модуль. Намеренно `pub(crate)`: снаружи крейта метки
+    /// по-прежнему невозможно изготовить вручную.
+    pub(crate) fn new(actor: A, counter: u64) -> Self {
+        Self { actor, counter }
+    }
+
+    /// Актор, выдавший метку.
+    pub fn actor(&self) -> &A {
+        &self.actor
+    }
+
+    /// Порядковый номер метки у актора.
+    pub fn counter(&self) -> u64 {
+        self.counter
+    }
+}
+
 /// Множество с поддержкой удаления и семантикой **add-wins**:
 /// при конкурентных `add(x)` и `remove(x)` элемент остаётся.
 ///
@@ -41,9 +63,8 @@ pub struct Dot<A: Actor> {
 /// Add-wins следует из определения: конкурентная вставка несёт метку,
 /// которую удаление не наблюдало и потому не похоронило.
 ///
-/// Плата — неограниченный рост надгробий; оптимизированные варианты
-/// (с причинным контекстом вместо надгробий) — направление для
-/// дальнейшей работы.
+/// Плата — неограниченный рост надгробий; оптимизированный вариант с
+/// причинным контекстом вместо надгробий — [`Orswot`](crate::Orswot).
 ///
 /// # Пример
 ///
@@ -125,6 +146,13 @@ impl<A: Actor, T: Ord + Clone> OrSet<A, T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Число надгробий — накопленных меток удалённых вставок.
+    /// Наблюдаемая метрика неограниченного роста состояния (см. план:
+    /// оптимизация через причинный контекст).
+    pub fn tombstone_count(&self) -> usize {
+        self.tombstones.len()
+    }
 }
 
 impl<A: Actor, T: Ord + Clone> JoinSemilattice for OrSet<A, T> {
@@ -142,6 +170,61 @@ impl<A: Actor, T: Ord + Clone> JoinSemilattice for OrSet<A, T> {
             let e = self.counters.entry(actor.clone()).or_insert(0);
             *e = (*e).max(n);
         }
+    }
+}
+
+/// Нарушение инварианта OR-Set: одна метка [`Dot`] прикреплена к разным
+/// элементам в двух состояниях.
+///
+/// Уникальность меток обеспечивается генератором ([`OrSet::add`]) только
+/// в пределах реплики; коллизия означает, что один актор работал на двух
+/// репликах одновременно (или счётчик актора был сброшен). После слияния
+/// такая метка «склеит» судьбу двух независимых вставок: одно `remove`
+/// похоронит обе.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MergeError<A: Actor, T: Ord + Clone> {
+    /// Метка, встретившаяся у разных элементов.
+    pub dot: Dot<A>,
+    /// Элементы, к которым метка прикреплена в `self` и `other`.
+    pub items: (T, T),
+}
+
+impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> fmt::Display for MergeError<A, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "метка {:?} прикреплена к разным элементам: {:?} и {:?}",
+            self.dot, self.items.0, self.items.1
+        )
+    }
+}
+
+impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> std::error::Error for MergeError<A, T> {}
+
+impl<A: Actor, T: Ord + Clone> ValidateMerge for OrSet<A, T> {
+    type Error = MergeError<A, T>;
+
+    /// Ошибка, если какая-то метка вставки прикреплена в двух состояниях
+    /// к разным элементам.
+    fn validate_merge(&self, other: &Self) -> Result<(), Self::Error> {
+        let their_dots: BTreeMap<&Dot<A>, &T> = other
+            .entries
+            .iter()
+            .flat_map(|(item, dots)| dots.iter().map(move |d| (d, item)))
+            .collect();
+        for (item, dots) in &self.entries {
+            for dot in dots {
+                if let Some(&their_item) = their_dots.get(dot) {
+                    if their_item != item {
+                        return Err(MergeError {
+                            dot: dot.clone(),
+                            items: (item.clone(), their_item.clone()),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
