@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ============================================================
+     ШАБЛОН. Не редактируйте web/index.html напрямую — он
+     генерируется скриптом web/build.sh из этого файла: плейсхолдер
+     GLUE (в первом script) заменяется на wasm-bindgen glue,
+     плейсхолдер WASM-B64 (во втором) — на base64 wasm-модуля.
+     ============================================================ -->
+<!-- Шрифт из дизайн-макета (только локально; в артефакте CSP блокирует CDN,
+     сработает системный моноширинный стек) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- ARTIFACT-START -->
+<title>CRDT Playground</title>
+<style>
+  /* Палитра и типографика — из дизайн-макета (тёмная терминальная тема, единственная по замыслу) */
+  :root {
+    --bg: #0a0e14;
+    --panel: #11161d;
+    --inset: #0d1219;
+    --border: #232b36;
+    --border-soft: #1c2530;
+    --text: #e6edf3;
+    --text-body: #c9d1d9;
+    --text-dim: #8b949e;
+    --text-faint: #6e7681;
+    --text-ghost: #484f58;
+    --acc-a: oklch(72% 0.14 250); /* replica A · blue   */
+    --acc-b: oklch(72% 0.14 320); /* replica B · magenta*/
+    --acc-c: oklch(75% 0.15 70);  /* replica C · amber  */
+    --ok: oklch(75% 0.17 150);    /* success · green    */
+    --err: oklch(65% 0.2 25);     /* offline · red      */
+    --warn: oklch(80% 0.15 85);   /* diverged · yellow  */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-body);
+    font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'Fira Code', Menlo, Consolas, monospace;
+    min-height: 100vh;
+    padding: 40px 24px;
+    font-variant-numeric: tabular-nums;
+  }
+  a { color: var(--acc-a); }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: filter 0.12s ease;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:focus-visible { outline: 2px solid var(--acc-a); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
+
+  .wrap { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+
+  .eyebrow { font-size: 12px; letter-spacing: 0.1em; color: var(--ok); text-transform: uppercase; font-weight: 600; }
+  .title { font-size: 32px; font-weight: 700; color: var(--text); }
+  .subtitle { font-size: 15px; color: var(--text-dim); max-width: 760px; line-height: 1.55; }
+  .header { display: flex; flex-direction: column; gap: 6px; }
+
+  .tabs-block { display: flex; flex-direction: column; gap: 10px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tab {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    padding: 8px 16px;
+  }
+  .tab.active {
+    background: #1c2733; border-color: var(--acc-a); color: var(--text); font-weight: 600;
+  }
+  .signature { font-size: 13px; color: var(--text-faint); font-style: italic; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .panel-title { font-size: 12px; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; font-weight: 600; }
+  .net-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .net-actions { display: flex; align-items: center; gap: 10px; }
+  .badge { font-size: 13px; padding: 6px 12px; border-radius: 6px; font-weight: 600; }
+  .badge.ok { background: oklch(75% 0.17 150 / 0.15); color: oklch(88% 0.12 150); }
+  .badge.warn { background: oklch(80% 0.15 85 / 0.15); color: oklch(88% 0.12 85); }
+  .btn-primary { background: var(--acc-a); border: none; color: var(--bg); padding: 8px 16px; font-weight: 600; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 16px; }
+
+  .links { display: flex; gap: 12px; flex-wrap: wrap; }
+  .link-row {
+    display: flex; align-items: center; gap: 10px; background: var(--inset);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  }
+  .link-label { font-size: 13px; color: var(--text-body); }
+  .link-status { padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: 600; }
+  .link-status.on { background: oklch(75% 0.17 150 / 0.15); border: 1px solid var(--ok); color: oklch(88% 0.12 150); }
+  .link-status.off { background: oklch(65% 0.2 25 / 0.15); border: 1px solid var(--err); color: oklch(85% 0.12 25); }
+  .link-sync { background: transparent; border: 1px solid var(--border); color: var(--text-faint); padding: 4px 10px; border-radius: 5px; font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; }
+  .card-id { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--text); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .pill { font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+  .pill.linked { background: oklch(75% 0.17 150 / 0.15); color: oklch(88% 0.12 150); }
+  .pill.isolated { background: oklch(65% 0.2 25 / 0.15); color: oklch(85% 0.12 25); }
+  .value-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
+  .value-big { font-size: 34px; font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+  .detail {
+    background: var(--inset); border: 1px solid var(--border-soft); border-radius: 6px;
+    padding: 10px 12px; font-size: 12px; color: var(--text-dim);
+    white-space: pre-wrap; line-height: 1.5; min-height: 20px; overflow-x: auto;
+  }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-op { padding: 10px; font-weight: 600; flex: 1; }
+  .btn-inc { background: oklch(72% 0.14 250 / 0.15); border: 1px solid var(--acc-a); color: oklch(85% 0.1 250); width: 100%; }
+  .btn-plus { background: oklch(75% 0.17 150 / 0.15); border: 1px solid var(--ok); color: oklch(88% 0.1 150); }
+  .btn-minus { background: oklch(65% 0.2 25 / 0.15); border: 1px solid var(--err); color: oklch(85% 0.1 25); }
+  .chip { padding: 8px 14px; }
+  .chip.off { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+
+  .log-list { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; font-size: 12.5px; }
+  .log-row { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--border-soft); }
+  .log-ts { color: var(--text-faint); min-width: 70px; }
+  .log-actor { min-width: 16px; font-weight: 700; }
+  .log-text { color: var(--text-body); }
+  .log-empty { color: var(--text-faint); font-style: italic; padding: 8px 0; }
+
+  .footer { font-size: 12px; color: var(--text-ghost); text-align: center; padding-top: 8px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="panel"><div class="panel-title">Loading</div><div class="detail">Instantiating crdt-lab WebAssembly module…</div></div>
+</div>
+
+<script>
+/*__GLUE__*/
+</script>
+
+<script>
+'use strict';
+// ============================================================================
+// CRDT Playground — каждая операция и каждое слияние ниже исполняются
+// НАСТОЯЩИМ кодом библиотеки crdt-lab (Rust), скомпилированным в
+// WebAssembly (крейт crdt-wasm). JS отвечает только за презентацию,
+// журнал и модель сети.
+// ============================================================================
+
+const WASM_B64 = '__WASM_B64__';
+
+const REPS = ['A', 'B', 'C'];
+const IDX = { A: 0, B: 1, C: 2 };
+const PAIRS = [['A', 'B'], ['B', 'C'], ['A', 'C']];
+const SET_ELEMS = ['alpha', 'beta', 'gamma'];
+const REG_VALUES = ['red', 'green', 'blue'];
+const SYNC_ROUNDS = 3;
+
+const TABS = [
+  { key: 'gcounter',  label: 'GCounter',     signature: 'join(a,b) = pointwise max — grow-only counter' },
+  { key: 'pncounter', label: 'PNCounter',    signature: 'product of two GCounters: P (increments) and N (decrements)' },
+  { key: 'gset',      label: 'GSet',         signature: 'join(a,b) = a ∪ b — grow-only set' },
+  { key: 'lww',       label: 'LWW-Register', signature: 'join(a,b) = max by (timestamp, actor) — last-write-wins' },
+  { key: 'mvreg',     label: 'MV-Register',  signature: 'join(a,b) = maximal antichain of (vector clock, value) — concurrent writes all survive' },
+  { key: 'orset',     label: 'OR-Set',       signature: 'add-wins set — tagged elements + tombstones' },
+];
+const CHIP_HUE = { gset: 250, lww: 320, mvreg: 200, orset: 70 };
+const ACTOR_COLOR = { A: 'var(--acc-a)', B: 'var(--acc-b)', C: 'var(--acc-c)' };
+
+let pg = null; // wasm_bindgen.Playground — состояние живёт в Rust
+let S = { tab: 'gcounter', links: { AB: true, BC: true, AC: true }, opCounter: 0, log: [] };
+
+const snap = (kind) => JSON.parse(pg.snapshot(kind));
+const linkKey = (x, y) => [x, y].sort().join('');
+
+function pushLog(actor, text) {
+  S.log.unshift({
+    ts: new Date().toLocaleTimeString('en-US', { hour12: false }),
+    actor: actor || '·',
+    color: actor ? ACTOR_COLOR[actor] : 'var(--ok)',
+    text,
+  });
+  S.log = S.log.slice(0, 60);
+}
+
+// --- Локальные операции (тонкие обёртки над crdt-wasm) ---------------------
+
+const OPS = {
+  incGC(actor) {
+    pg.gcounter_increment(actor);
+    const local = snap('gcounter')[IDX[actor]].counts[actor];
+    pushLog(actor, `increment() → local[${actor}]=${local}`);
+  },
+  incPN(actor, sign) {
+    pg.pncounter_update(actor, sign === 'p');
+    const view = snap('pncounter')[IDX[actor]];
+    pushLog(actor, `${sign === 'p' ? 'increment' : 'decrement'}() → ${sign.toUpperCase()}[${actor}]=${view[sign][actor]}`);
+  },
+  addGSet(actor, elem) {
+    if (!snap('gset')[IDX[actor]].elements.includes(elem)) {
+      pg.gset_add(actor, elem);
+      pushLog(actor, `add("${elem}")`);
+    }
+  },
+  setLWW(actor, val) {
+    const ts = Date.now() * 10 + (S.opCounter % 10);
+    S.opCounter += 1;
+    pg.lww_write(actor, ts, val);
+    pushLog(actor, `set("${val}") @ ts=${ts}`);
+  },
+  writeMV(actor, val) {
+    pg.mvreg_write(actor, val);
+    const c = snap('mvreg')[IDX[actor]].entries[0].clock;
+    pushLog(actor, `write("${val}") @ (A:${c.A} B:${c.B} C:${c.C})`);
+  },
+  toggleOR(actor, elem) {
+    pushLog(actor, pg.orset_toggle(actor, elem));
+  },
+};
+
+// --- Сеть ------------------------------------------------------------------
+
+function syncPair(x, y) {
+  if (!S.links[linkKey(x, y)]) { pushLog(null, `✗ ${x} ↔ ${y} offline — sync skipped`); return; }
+  pg.sync(S.tab, x, y);
+  pushLog(null, `sync ${x} ↔ ${y}`);
+}
+
+function syncAll() {
+  for (let round = 0; round < SYNC_ROUNDS; round++) {
+    PAIRS.forEach(([x, y]) => { if (S.links[linkKey(x, y)]) pg.sync(S.tab, x, y); });
+  }
+  pushLog(null, `sync all — merged along active links (${SYNC_ROUNDS} propagation rounds)`);
+}
+
+// --- Представление ---------------------------------------------------------
+
+function visibleInfo(type, v) {
+  switch (type) {
+    case 'gcounter':
+      return { big: String(v.sum), label: 'sum', detail: `A:${v.counts.A}  B:${v.counts.B}  C:${v.counts.C}` };
+    case 'pncounter':
+      return { big: String(v.value), label: 'net (P − N)', detail: `P  A:${v.p.A} B:${v.p.B} C:${v.p.C}\nN  A:${v.n.A} B:${v.n.B} C:${v.n.C}` };
+    case 'gset': {
+      const sorted = [...v.elements].sort();
+      return { big: String(sorted.length), label: 'elements', detail: sorted.length ? `{ ${sorted.join(', ')} }` : '{ }' };
+    }
+    case 'lww':
+      return { big: v.value || '—', label: 'current value', detail: v.actor ? `set by ${v.actor} @ ts=${v.ts}` : 'unset' };
+    case 'mvreg': {
+      const values = v.entries.map(e => e.value).sort();
+      return {
+        big: values.length ? values.join(' | ') : '—',
+        label: values.length > 1 ? 'concurrent values' : 'current value',
+        detail: v.entries.length
+          ? v.entries.map(e => `${e.value} @ (A:${e.clock.A} B:${e.clock.B} C:${e.clock.C})`).join('\n')
+          : 'unset',
+      };
+    }
+    case 'orset': {
+      const visible = [...v.visible].sort();
+      return { big: String(visible.length), label: 'visible', detail: `{ ${visible.join(', ') || '—'} }  ·  ${v.tombstones} tombstone${v.tombstones === 1 ? '' : 's'}` };
+    }
+  }
+}
+
+function chipsFor(type, v) {
+  if (type === 'gset')  return SET_ELEMS.map(e => ({ v: e, on: v.elements.includes(e) }));
+  if (type === 'orset') return SET_ELEMS.map(e => ({ v: e, on: v.visible.includes(e) }));
+  if (type === 'lww')   return REG_VALUES.map(x => ({ v: x, on: v.value === x }));
+  if (type === 'mvreg') return REG_VALUES.map(x => ({ v: x, on: v.entries.some(e => e.value === x) }));
+  return [];
+}
+
+function chipStyle(active, hue) {
+  return active
+    ? `background:oklch(72% 0.14 ${hue}); border:1px solid oklch(72% 0.14 ${hue}); color:var(--bg); font-weight:600;`
+    : '';
+}
+
+function render() {
+  const t = S.tab;
+  const tabInfo = TABS.find(x => x.key === t);
+  const views = snap(t);
+  const converged = pg.converged(t);
+  const linkedTo = (actor) => REPS.filter(o => o !== actor).some(o => S.links[linkKey(actor, o)]);
+
+  const tabsHtml = TABS.map(x =>
+    `<button class="tab ${x.key === t ? 'active' : ''}" data-act="tab" data-key="${x.key}">${x.label}</button>`
+  ).join('');
+
+  const linksHtml = PAIRS.map(([x, y]) => {
+    const key = linkKey(x, y);
+    const on = S.links[key];
+    return `<div class="link-row">
+      <span class="link-label">${x} ↔ ${y}</span>
+      <button class="link-status ${on ? 'on' : 'off'}" data-act="link-toggle" data-key="${key}">${on ? 'ONLINE' : 'OFFLINE'}</button>
+      <button class="link-sync" data-act="link-sync" data-key="${key}">sync</button>
+    </div>`;
+  }).join('');
+
+  const cardsHtml = REPS.map(actor => {
+    const view = views[IDX[actor]];
+    const info = visibleInfo(t, view);
+    const online = linkedTo(actor);
+    let actions = '';
+    if (t === 'gcounter') {
+      actions = `<button class="btn-op btn-inc" data-act="inc-gc" data-actor="${actor}">+1 increment()</button>`;
+    } else if (t === 'pncounter') {
+      actions = `<div class="actions">
+        <button class="btn-op btn-plus" data-act="pn" data-actor="${actor}" data-sign="p">+1</button>
+        <button class="btn-op btn-minus" data-act="pn" data-actor="${actor}" data-sign="n">−1</button>
+      </div>`;
+    } else {
+      const chips = chipsFor(t, view).map(c =>
+        `<button class="chip ${c.on ? '' : 'off'}" style="${chipStyle(c.on, CHIP_HUE[t])}" data-act="chip" data-actor="${actor}" data-val="${c.v}">${c.v}</button>`
+      ).join('');
+      actions = `<div class="actions">${chips}</div>`;
+    }
+    return `<div class="card">
+      <div class="card-head">
+        <div class="card-id"><span class="dot" style="background:${ACTOR_COLOR[actor]}"></span>Replica ${actor}</div>
+        <span class="pill ${online ? 'linked' : 'isolated'}">${online ? 'LINKED' : 'ISOLATED'}</span>
+      </div>
+      <div>
+        <div class="value-label">${info.label}</div>
+        <div class="value-big">${info.big}</div>
+      </div>
+      <div class="detail">${info.detail}</div>
+      ${actions}
+    </div>`;
+  }).join('');
+
+  const logHtml = S.log.length
+    ? S.log.map(e => `<div class="log-row">
+        <span class="log-ts">${e.ts}</span>
+        <span class="log-actor" style="color:${e.color}">${e.actor}</span>
+        <span class="log-text">${e.text}</span>
+      </div>`).join('')
+    : '<div class="log-empty">No operations yet — try an action above.</div>';
+
+  document.getElementById('app').innerHTML = `
+    <div class="header">
+      <div class="eyebrow">crdt-lab · live · rust → webassembly</div>
+      <div class="title">CRDT Convergence Playground</div>
+      <div class="subtitle">Three replicas (A, B, C) apply local operations independently, then merge (⊔) to reach strong eventual consistency. Toggle the network links to simulate partitions and watch the replicas converge — or diverge. Every operation and merge runs the actual <b>crdt-lab</b> Rust code compiled to WebAssembly.</div>
+    </div>
+
+    <div class="tabs-block">
+      <div class="tabs">${tabsHtml}</div>
+      <div class="signature">// ${tabInfo.signature}</div>
+    </div>
+
+    <div class="panel">
+      <div class="net-head">
+        <div class="panel-title">Network</div>
+        <div class="net-actions">
+          <span class="badge ${converged ? 'ok' : 'warn'}">${converged ? '✓ Converged' : '⚠ Diverged'}</span>
+          <button class="btn-primary" data-act="sync-all">Sync All</button>
+          <button class="btn-ghost" data-act="reset">Reset</button>
+        </div>
+      </div>
+      <div class="links">${linksHtml}</div>
+    </div>
+
+    <div class="grid">${cardsHtml}</div>
+
+    <div class="panel">
+      <div class="panel-title">Activity Log</div>
+      <div class="log-list">${logHtml}</div>
+    </div>
+
+    <div class="footer">Companion demo for «Реализация и анализ свойств сходимости CRDT средствами системы типов Rust»<br>GCounter · PNCounter · GSet · LWW-Register · MV-Register · OR-Set · powered by crdt-lab (Rust → WebAssembly)</div>
+  `;
+}
+
+// --- Диспетчер событий -----------------------------------------------------
+
+document.getElementById('app').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn || !pg) return;
+  const { act, key, actor, sign, val } = btn.dataset;
+  switch (act) {
+    case 'tab': S.tab = key; break;
+    case 'link-toggle': {
+      S.links[key] = !S.links[key];
+      pushLog(null, `link ${key[0]} ↔ ${key[1]} → ${S.links[key] ? 'ONLINE' : 'OFFLINE'}`);
+      break;
+    }
+    case 'link-sync': syncPair(key[0], key[1]); break;
+    case 'sync-all': syncAll(); break;
+    case 'reset': {
+      pg.reset();
+      S = { tab: 'gcounter', links: { AB: true, BC: true, AC: true }, opCounter: 0, log: [] };
+      break;
+    }
+    case 'inc-gc': OPS.incGC(actor); break;
+    case 'pn': OPS.incPN(actor, sign); break;
+    case 'chip': {
+      if (S.tab === 'gset') OPS.addGSet(actor, val);
+      else if (S.tab === 'lww') OPS.setLWW(actor, val);
+      else if (S.tab === 'mvreg') OPS.writeMV(actor, val);
+      else if (S.tab === 'orset') OPS.toggleOR(actor, val);
+      break;
+    }
+  }
+  render();
+});
+
+// --- Загрузка wasm-модуля --------------------------------------------------
+
+(async function boot() {
+  try {
+    const bytes = Uint8Array.from(atob(WASM_B64), c => c.charCodeAt(0));
+    await wasm_bindgen({ module_or_path: bytes });
+    pg = new wasm_bindgen.Playground();
+    render();
+  } catch (err) {
+    document.getElementById('app').innerHTML = `
+      <div class="panel">
+        <div class="panel-title">WebAssembly failed to load</div>
+        <div class="detail">${String(err)}
+
+Если среда запрещает исполнение WebAssembly (жёсткая CSP), откройте web/index.html из репозитория локально в браузере.</div>
+      </div>`;
+  }
+})();
+</script>
+<!-- ARTIFACT-END -->
+</body>
+</html>
