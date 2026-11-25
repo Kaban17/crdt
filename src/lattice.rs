@@ -1,123 +1,123 @@
-//! Ядро библиотеки: контракт полурешётки соединения и производные понятия.
+//! Core of the library: the join-semilattice contract and derived notions.
 //!
-//! Здесь система типов Rust используется как «носитель» алгебраической
-//! спецификации: трейт [`JoinSemilattice`] фиксирует сигнатуру операции
-//! `⊔`, а её законы (ассоциативность, коммутативность, идемпотентность)
-//! проверяются обобщёнными property-based тестами, единожды написанными
-//! для любого `T: JoinSemilattice`.
+//! The Rust type system carries the algebraic specification: the
+//! [`JoinSemilattice`] trait fixes the signature of `⊔`, and its laws
+//! (associativity, commutativity, idempotence) are checked by generic
+//! property-based tests written once for any `T: JoinSemilattice`.
 
-/// Идентификатор реплики (актора).
+/// Replica (actor) identifier.
 ///
-/// Трейт-псевдоним: собирает в одном месте требования к типу идентификатора.
-/// `Ord` нужен для детерминированных структур (`BTreeMap`/`BTreeSet`) и
-/// разрешения конфликтов, `Clone` — для хранения в нескольких компонентах
-/// состояния.
+/// A trait alias that collects the requirements on the identifier type.
+/// `Ord` is needed for deterministic collections (`BTreeMap`/`BTreeSet`)
+/// and conflict resolution; `Clone` is needed to store the id in several
+/// components of the state.
 pub trait Actor: Ord + Clone {}
 
 impl<A: Ord + Clone> Actor for A {}
 
-/// Полурешётка соединения: тип с операцией `⊔` (join).
+/// Join-semilattice: a type with a join operation `⊔`.
 ///
-/// # Контракт (проверяется тестами, не компилятором)
+/// # Contract (checked by tests, not by the compiler)
 ///
-/// Для любых `a`, `b`, `c`:
+/// For any `a`, `b`, `c`:
 ///
-/// * `(a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)` — ассоциативность;
-/// * `a ⊔ b = b ⊔ a` — коммутативность;
-/// * `a ⊔ a = a` — идемпотентность.
+/// * `(a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)` — associativity;
+/// * `a ⊔ b = b ⊔ a` — commutativity;
+/// * `a ⊔ a = a` — idempotence.
 ///
-/// Законы невыразимы в системе типов Rust напрямую (нет зависимых типов),
-/// поэтому граница ответственности проведена так: *сигнатуры* и
-/// *выводимые определения* — в трейте, *законы* — в обобщённых
-/// property-based тестах (`tests/laws.rs`).
+/// The laws are not expressible in Rust's type system (no dependent
+/// types). Responsibility is split accordingly: *signatures* and
+/// *derived definitions* live in the trait; *laws* live in generic
+/// property-based tests (`tests/laws.rs`).
 ///
-/// # Выводимый порядок
+/// # Derived order
 ///
-/// Частичный порядок **не** реализуется вручную: метод [`leq`](Self::leq)
-/// определён через `join` по классическому соотношению
-/// `a ≤ b ⟺ a ⊔ b = b`. Тем самым порядок и слияние согласованы
-/// по построению — одна из иллюстраций тезиса работы.
+/// The partial order is not implemented by hand: [`leq`](Self::leq) is
+/// defined from `join` by the classical identity `a ≤ b ⟺ a ⊔ b = b`.
+/// The order and the merge therefore agree by construction.
 pub trait JoinSemilattice: Clone + Eq {
-    /// Операция `⊔`: заменяет `self` на `self ⊔ other`.
+    /// The `⊔` operation: replaces `self` with `self ⊔ other`.
     ///
-    /// Принимает `other` по неизменяемой ссылке: слияние не имеет права
-    /// модифицировать вторую реплику, и это гарантирует уже сигнатура.
+    /// Takes `other` by shared reference: merge must not mutate the
+    /// other replica, and the signature already enforces that.
     fn join(&mut self, other: &Self);
 
-    /// Владельческая форма `⊔`: удобна в свёртках и тестах.
+    /// Owning form of `⊔`: convenient in folds and tests.
     #[must_use]
     fn joined(mut self, other: &Self) -> Self {
         self.join(other);
         self
     }
 
-    /// Частичный порядок, индуцированный `join`: `a ≤ b ⟺ a ⊔ b = b`.
+    /// Partial order induced by `join`: `a ≤ b ⟺ a ⊔ b = b`.
     fn leq(&self, other: &Self) -> bool {
         self.clone().joined(other) == *other
     }
 }
 
-/// Локальные обновления CvRDT.
+/// Local updates of a CvRDT.
 ///
-/// Спецификация Shapiro et al. требует от операций **инфляционности**:
-/// `a ≤ apply(a, op)` для любой операции — это второе (после законов
-/// полурешётки) условие теоремы о сходимости. Вынесение операций в
-/// ассоциированный тип [`Op`](Self::Op) делает это уравнение обобщённым:
-/// как и законы `⊔`, оно записано один раз для любого `T: Update`
-/// и инстанцируется макросом (`tests/laws.rs`, `inflation_law!`).
+/// Shapiro et al. require operations to be **inflationary**:
+/// `a ≤ apply(a, op)` for any operation. That is the second hypothesis
+/// of the convergence theorem, after the semilattice laws. Putting
+/// operations in the associated type [`Op`](Self::Op) makes the
+/// equation generic: like the laws of `⊔`, it is written once for any
+/// `T: Update` and instantiated by a macro (`tests/laws.rs`,
+/// `inflation_law!`).
 ///
-/// Дополнительный эффект — генерация произвольных *достижимых* состояний
-/// в тестах становится универсальной: состояние есть свёртка списка
-/// операций (`tests/common/mod.rs`, функция `build`).
+/// A side effect is that generating arbitrary *reachable* states in
+/// tests becomes universal: a state is a fold of a list of operations
+/// (`tests/common/mod.rs`, function `build`).
 pub trait Update: JoinSemilattice {
-    /// Тип локальной операции.
+    /// Type of a local operation.
     type Op;
 
-    /// Применить локальную операцию к состоянию.
+    /// Apply a local operation to the state.
     fn apply(&mut self, op: Self::Op);
 }
 
-/// Валидация протокольных инвариантов перед слиянием.
+/// Validation of protocol invariants before merge.
 ///
-/// Система типов Rust статически гарантирует часть спецификации CvRDT
-/// (сигнатуры, невозможность мутировать чужую реплику), но *протокольные*
-/// инварианты — свойства корректных историй, а не отдельных состояний —
-/// ей недоступны: уникальность меток времени LWW, уникальность [`Dot`]-меток
-/// OR-Set, инъективность «часы → значение» MV-регистра. Их нарушение не
-/// ломает законы полурешётки (те верны для *любых* состояний), но делает
-/// сошедшееся значение бессмысленным.
+/// Rust's type system statically guarantees part of the CvRDT
+/// specification (signatures, no mutation of the other replica), but
+/// *protocol* invariants — properties of well-formed histories, not of
+/// individual states — are out of reach: uniqueness of LWW timestamps,
+/// uniqueness of [`Dot`] tags in an OR-Set, injectivity of
+/// "clock → value" for the MV-register. Breaking them does not break
+/// the semilattice laws (those hold for *any* states), but it makes the
+/// converged value meaningless.
 ///
-/// Этот трейт поднимает такие инварианты в API как **типизированные
-/// ошибки**: перед `join` пара состояний проверяется на противоречие, и
-/// нарушение возвращается как значение ассоциированного типа
-/// [`Error`](Self::Error), а не обнаруживается молча после слияния.
-/// Граница подхода видна по составу реализаций: у `GCounter`/`GSet`
-/// противоречие двух состояний ненаблюдаемо в принципе (любая пара
-/// состояний — легальная пара реплик), поэтому для них трейт не
-/// реализован — само это отсутствие является результатом анализа.
+/// This trait lifts those invariants into the API as **typed errors**:
+/// before `join`, a pair of states is checked for contradiction, and a
+/// violation is returned as a value of the associated type
+/// [`Error`](Self::Error) rather than discovered silently after merge.
+/// The limit of the approach is visible in which types implement it:
+/// for `GCounter`/`GSet` a contradiction between two states is
+/// unobservable in principle (any pair of states is a legal pair of
+/// replicas), so the trait is not implemented for them.
 ///
 /// [`Dot`]: crate::orset::Dot
 pub trait ValidateMerge: JoinSemilattice {
-    /// Свидетельство нарушения инварианта: что именно противоречиво.
+    /// Witness of an invariant violation: what exactly contradicts.
     type Error;
 
-    /// Проверить пару состояний на противоречие протокольным инвариантам.
+    /// Check a pair of states against protocol invariants.
     ///
-    /// `Ok(())` не означает «состояния корректны» — только что данная
-    /// пара не содержит *наблюдаемого* противоречия. Отношение
-    /// симметрично с точностью до ориентации свидетельства.
+    /// `Ok(())` does not mean "the states are well formed", only that
+    /// this pair contains no *observable* contradiction. The relation
+    /// is symmetric up to the orientation of the witness.
     fn validate_merge(&self, other: &Self) -> Result<(), Self::Error>;
 }
 
-/// Состояние-ориентированный CRDT (CvRDT).
+/// State-based CRDT (CvRDT).
 ///
-/// Слияние состояний реплик — это в точности `⊔` полурешётки, поэтому
-/// трейт реализован *автоматически* (blanket impl) для любой полурешётки:
-/// в данной модели «быть CvRDT» и «быть полурешёткой с инфляционными
-/// обновлениями» — одно и то же. Инфляционность обновлений — обязанность
-/// конкретного типа и предмет отдельных тестов.
+/// Merging replica states is exactly the semilattice `⊔`, so the trait
+/// is implemented *automatically* (blanket impl) for any semilattice:
+/// in this model "being a CvRDT" and "being a semilattice with
+/// inflationary updates" are the same thing. Inflation of updates is
+/// the responsibility of each concrete type and of separate tests.
 pub trait CvRdt: JoinSemilattice {
-    /// Слить состояние другой реплики в текущее.
+    /// Merge another replica's state into this one.
     fn merge(&mut self, other: &Self) {
         self.join(other);
     }
@@ -129,7 +129,7 @@ impl<T: JoinSemilattice> CvRdt for T {}
 mod tests {
     use super::*;
 
-    /// Минимальная полурешётка для теста выводимого порядка: max по u64.
+    /// Minimal semilattice for the derived-order test: max on u64.
     #[derive(Clone, PartialEq, Eq, Debug)]
     struct MaxU64(u64);
 

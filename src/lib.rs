@@ -1,58 +1,55 @@
 //! # crdt-lab
 //!
-//! Учебно-исследовательская библиотека к работе
-//! **«Реализация и анализ свойств сходимости CRDT средствами системы типов Rust»**.
+//! A small Rust library of state-based CRDTs (CvRDTs).
 //!
-//! ## Теоретическая основа
+//! ## Theory
 //!
-//! Состояние-ориентированный CRDT (CvRDT, *convergent replicated data type*)
-//! по Shapiro, Preguiça, Baquero, Zawirski (2011) — это тип данных, состояния
-//! которого образуют **полурешётку соединения** (join-semilattice): частично
-//! упорядоченное множество `(S, ≤)` с операцией `⊔` (join, точная верхняя
-//! грань), удовлетворяющей законам:
+//! A state-based CRDT (CvRDT, *convergent replicated data type*) after
+//! Shapiro, Preguiça, Baquero, Zawirski (2011) is a data type whose
+//! states form a **join-semilattice**: a partially ordered set `(S, ≤)`
+//! with a join operation `⊔` (least upper bound) that satisfies:
 //!
-//! * **ассоциативность**: `(a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)`;
-//! * **коммутативность**: `a ⊔ b = b ⊔ a`;
-//! * **идемпотентность**: `a ⊔ a = a`.
+//! * **associativity**: `(a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)`;
+//! * **commutativity**: `a ⊔ b = b ⊔ a`;
+//! * **idempotence**: `a ⊔ a = a`.
 //!
-//! Локальные обновления обязаны быть **инфляционными** (`a ≤ update(a)`),
-//! а слияние реплик — это в точности `⊔`. Из этих условий следует
-//! **сильная согласованность в конечном счёте** (Strong Eventual
-//! Consistency, SEC): две реплики, получившие один и тот же набор обновлений
-//! в *любом* порядке и с *любыми* дублями, оказываются в одинаковом
-//! состоянии.
+//! Local updates must be **inflationary** (`a ≤ update(a)`), and replica
+//! merge is exactly `⊔`. These conditions imply **strong eventual
+//! consistency** (SEC): two replicas that have seen the same set of
+//! updates, in *any* order and with *any* duplicates, end in the same
+//! state.
 //!
-//! ## Роль системы типов Rust
+//! ## Role of the Rust type system
 //!
-//! Ключевая идея работы — выразить контракт полурешётки как трейт
-//! [`lattice::JoinSemilattice`] и получить:
+//! The semilattice contract is the [`lattice::JoinSemilattice`] trait.
+//! From that the crate gets:
 //!
-//! 1. **Обобщённую проверку законов**: property-based тесты (см. каталог
-//!    `tests/`) написаны один раз для любого `T: JoinSemilattice` и
-//!    инстанцируются макросом для каждой реализации;
-//! 2. **Выводимый порядок**: отношение `≤` не реализуется вручную, а
-//!    *выводится* из `join` (`a ≤ b ⟺ a ⊔ b = b`), что исключает
-//!    рассогласование порядка и слияния;
-//! 3. **Статические гарантии**: параметризация идентификатором реплики
-//!    (`A: Actor`) и владение (`&mut self` / `&Self`) не позволяют смешать
-//!    состояния разных типов или изменить чужую реплику при слиянии;
-//! 4. **Типизированные инварианты**: протокольные инварианты, невыразимые
-//!    статически (уникальность меток), подняты в API как `Result` —
-//!    трейт [`lattice::ValidateMerge`] с ассоциированным типом ошибки.
+//! 1. **Generic law checks**: property-based tests (see `tests/`) are
+//!    written once for any `T: JoinSemilattice` and instantiated by a
+//!    macro for each implementation;
+//! 2. **Derived order**: `≤` is not written by hand; it is *derived*
+//!    from `join` (`a ≤ b ⟺ a ⊔ b = b`), so the order and the merge
+//!    cannot disagree;
+//! 3. **Static guarantees**: parameterization by replica id (`A: Actor`)
+//!    and ownership (`&mut self` / `&Self`) keep distinct types from
+//!    mixing and keep merge from mutating the other replica;
+//! 4. **Typed invariants**: protocol invariants that types cannot
+//!    express (tag uniqueness) are lifted into the API as `Result` via
+//!    [`lattice::ValidateMerge`] and an associated error type.
 //!
-//! ## Реализованные типы
+//! ## Implemented types
 //!
-//! | Модуль | Тип | Класс |
+//! | Module | Type | Kind |
 //! |---|---|---|
-//! | [`vclock`] | [`VClock`] | векторные часы (строительный блок) |
-//! | [`gcounter`] | [`GCounter`] | растущий счётчик |
-//! | [`pncounter`] | [`PnCounter`] | счётчик со сложением/вычитанием |
-//! | [`gset`] | [`GSet`] | растущее множество |
-//! | [`lww`] | [`LwwRegister`] | регистр «последняя запись побеждает» |
-//! | [`mvreg`] | [`MvRegister`] | многозначный регистр (конкурентные записи сохраняются) |
-//! | [`orset`] | [`OrSet`] | множество с наблюдаемым удалением (add-wins) |
-//! | [`orswot`] | [`Orswot`] | OR-Set без надгробий (причинный контекст) |
-//! | [`cmrdt`] | [`OpCounter`], [`OpOrSet`] | op-based модель (CmRDT) для сравнения |
+//! | [`vclock`] | [`VClock`] | vector clock (building block) |
+//! | [`gcounter`] | [`GCounter`] | grow-only counter |
+//! | [`pncounter`] | [`PnCounter`] | counter with increment/decrement |
+//! | [`gset`] | [`GSet`] | grow-only set |
+//! | [`lww`] | [`LwwRegister`] | last-writer-wins register |
+//! | [`mvreg`] | [`MvRegister`] | multi-value register (concurrent writes are kept) |
+//! | [`orset`] | [`OrSet`] | observed-remove set (add-wins) |
+//! | [`orswot`] | [`Orswot`] | OR-Set without tombstones (causal context) |
+//! | [`cmrdt`] | [`OpCounter`], [`OpOrSet`] | op-based model (CmRDT) for comparison |
 
 pub mod cmrdt;
 pub mod gcounter;

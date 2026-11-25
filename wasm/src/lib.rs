@@ -1,10 +1,10 @@
-//! WebAssembly-биндинги: демонстрация `web/index.html` исполняет
-//! **настоящий** код `crdt-lab`, а не JS-порт его семантики.
+//! WebAssembly bindings: the `web/index.html` demo runs the **real**
+//! `crdt-lab` code, not a JS port of its semantics.
 //!
-//! Экспортируется один объект [`Playground`] с тремя репликами (A, B, C)
-//! всех шести типов. Наружу отдаются только операции публичного API
-//! библиотеки и JSON-снимки наблюдаемого состояния; вся презентация
-//! остаётся на стороне страницы.
+//! A single [`Playground`] object is exported, with three replicas
+//! (A, B, C) of all six types. Only public-API operations of the
+//! library and JSON snapshots of observed state go out; all
+//! presentation stays on the page.
 
 use crdt_lab::{
     orset, GCounter, GSet, JoinSemilattice, LwwRegister, MvRegister, OrSet, PnCounter, Update,
@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 
 const REPLICAS: [&str; 3] = ["A", "B", "C"];
 
-/// Состояние одной реплики: по экземпляру каждого типа.
+/// State of one replica: an instance of each type.
 struct Node {
     gcounter: GCounter<String>,
     pncounter: PnCounter<String>,
@@ -30,7 +30,7 @@ impl Node {
             gcounter: GCounter::new(),
             pncounter: PnCounter::new(),
             gset: GSet::new(),
-            // пустой актор и значение — "ещё не установлено"
+            // empty actor and value: "not yet set"
             lww: LwwRegister::new(String::new(), String::new()),
             mvreg: MvRegister::new(),
             orset: OrSet::new(),
@@ -38,7 +38,7 @@ impl Node {
     }
 }
 
-/// Три реплики и операции над ними — интерфейс демонстрации.
+/// Three replicas and operations on them: the demo interface.
 #[wasm_bindgen]
 pub struct Playground {
     nodes: Vec<Node>,
@@ -53,7 +53,7 @@ fn index_of(replica: &str) -> usize {
 
 #[wasm_bindgen]
 impl Playground {
-    /// Создать площадку с пустыми репликами.
+    /// Create a playground with empty replicas.
     #[wasm_bindgen(constructor)]
     pub fn new() -> Playground {
         Playground {
@@ -61,12 +61,12 @@ impl Playground {
         }
     }
 
-    /// Сбросить все реплики в начальное состояние.
+    /// Reset all replicas to the initial state.
     pub fn reset(&mut self) {
         self.nodes = (0..REPLICAS.len()).map(|_| Node::new()).collect();
     }
 
-    // --- Локальные операции (crdt_lab::Update::apply под капотом) ---
+    // --- Local operations (crdt_lab::Update::apply under the hood) ---
 
     pub fn gcounter_increment(&mut self, replica: &str) {
         self.nodes[index_of(replica)]
@@ -102,8 +102,8 @@ impl Playground {
             .apply((replica.to_string(), value.to_string()));
     }
 
-    /// OR-Set: если элемент видим — удалить, иначе вставить.
-    /// Возвращает строку для журнала операций.
+    /// OR-Set: if the element is visible, remove it, otherwise insert.
+    /// Returns a string for the operation log.
     pub fn orset_toggle(&mut self, replica: &str, elem: &str) -> String {
         let set = &mut self.nodes[index_of(replica)].orset;
         if set.contains(&elem.to_string()) {
@@ -115,10 +115,11 @@ impl Playground {
         }
     }
 
-    // --- Слияние и наблюдение ---
+    // --- Merge and observation ---
 
-    /// Слить состояния данного типа между двумя репликами (`⊔` библиотеки,
-    /// симметрично: обе получают точную верхнюю грань).
+    /// Merge the states of the given type between two replicas
+    /// (the library `⊔`, symmetrically: both receive the least upper
+    /// bound).
     pub fn sync(&mut self, kind: &str, x: &str, y: &str) {
         let (xi, yi) = (index_of(x), index_of(y));
         macro_rules! sync_field {
@@ -139,7 +140,8 @@ impl Playground {
         }
     }
 
-    /// Сошлись ли все реплики по данному типу (структурное `Eq` библиотеки).
+    /// Whether all replicas have converged for the given type
+    /// (structural `Eq` of the library).
     pub fn converged(&self, kind: &str) -> bool {
         macro_rules! all_eq {
             ($field:ident) => {
@@ -157,7 +159,8 @@ impl Playground {
         }
     }
 
-    /// JSON-снимок наблюдаемого состояния типа по всем репликам.
+    /// JSON snapshot of the observed state of the type across all
+    /// replicas.
     pub fn snapshot(&self, kind: &str) -> String {
         let per_replica: Vec<Value> = self.nodes.iter().map(|n| node_view(kind, n)).collect();
         json!(per_replica).to_string()

@@ -4,19 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ============================================================
-     ШАБЛОН. Не редактируйте web/index.html напрямую — он
-     генерируется скриптом web/build.sh из этого файла: плейсхолдер
-     GLUE (в первом script) заменяется на wasm-bindgen glue,
-     плейсхолдер WASM-B64 (во втором) — на base64 wasm-модуля.
+     TEMPLATE. Do not edit web/index.html directly: it is generated
+     by web/build.sh from this file. The GLUE placeholder (first
+     script) is replaced with wasm-bindgen glue; the WASM-B64
+     placeholder (second script) is replaced with the base64 wasm
+     module.
      ============================================================ -->
-<!-- Шрифт из дизайн-макета (только локально; в артефакте CSP блокирует CDN,
-     сработает системный моноширинный стек) -->
+<!-- Font from the design mock (local only; in the artifact CSP
+     blocks the CDN, so the system monospace stack is used) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <!-- ARTIFACT-START -->
 <title>CRDT Playground</title>
 <style>
-  /* Палитра и типографика — из дизайн-макета (тёмная терминальная тема, единственная по замыслу) */
+  /* Palette and typography from the design mock (dark terminal theme) */
   :root {
     --bg: #0a0e14;
     --panel: #11161d;
@@ -151,10 +152,10 @@
 <script>
 'use strict';
 // ============================================================================
-// CRDT Playground — каждая операция и каждое слияние ниже исполняются
-// НАСТОЯЩИМ кодом библиотеки crdt-lab (Rust), скомпилированным в
-// WebAssembly (крейт crdt-wasm). JS отвечает только за презентацию,
-// журнал и модель сети.
+// CRDT Playground: every operation and merge below is executed by
+// the real crdt-lab library (Rust), compiled to WebAssembly
+// (crate crdt-wasm). JS handles presentation, the log, and the
+// network model.
 // ============================================================================
 
 const WASM_B64 = '__WASM_B64__';
@@ -177,7 +178,7 @@ const TABS = [
 const CHIP_HUE = { gset: 250, lww: 320, mvreg: 200, orset: 70 };
 const ACTOR_COLOR = { A: 'var(--acc-a)', B: 'var(--acc-b)', C: 'var(--acc-c)' };
 
-let pg = null; // wasm_bindgen.Playground — состояние живёт в Rust
+let pg = null; // wasm_bindgen.Playground — state lives in Rust
 let S = { tab: 'gcounter', links: { AB: true, BC: true, AC: true }, opCounter: 0, log: [] };
 
 const snap = (kind) => JSON.parse(pg.snapshot(kind));
@@ -193,7 +194,7 @@ function pushLog(actor, text) {
   S.log = S.log.slice(0, 60);
 }
 
-// --- Локальные операции (тонкие обёртки над crdt-wasm) ---------------------
+// --- Local operations (thin wrappers over crdt-wasm) ----------------------
 
 const OPS = {
   incGC(actor) {
@@ -228,7 +229,7 @@ const OPS = {
   },
 };
 
-// --- Сеть ------------------------------------------------------------------
+// --- Network ---------------------------------------------------------------
 
 function syncPair(x, y) {
   if (!S.links[linkKey(x, y)]) { pushLog(null, `✗ ${x} ↔ ${y} offline — sync skipped`); return; }
@@ -243,7 +244,7 @@ function syncAll() {
   pushLog(null, `sync all — merged along active links (${SYNC_ROUNDS} propagation rounds)`);
 }
 
-// --- Представление ---------------------------------------------------------
+// --- View ------------------------------------------------------------------
 
 function visibleInfo(type, v) {
   switch (type) {
@@ -380,11 +381,11 @@ function render() {
       <div class="log-list">${logHtml}</div>
     </div>
 
-    <div class="footer">Companion demo for «Реализация и анализ свойств сходимости CRDT средствами системы типов Rust»<br>GCounter · PNCounter · GSet · LWW-Register · MV-Register · OR-Set · powered by crdt-lab (Rust → WebAssembly)</div>
+    <div class="footer">Interactive demo of crdt-lab<br>GCounter · PNCounter · GSet · LWW-Register · MV-Register · OR-Set · powered by crdt-lab (Rust → WebAssembly)</div>
   `;
 }
 
-// --- Диспетчер событий -----------------------------------------------------
+// --- Event dispatcher ------------------------------------------------------
 
 document.getElementById('app').addEventListener('click', (ev) => {
   const btn = ev.target.closest('button[data-act]');
@@ -417,7 +418,7 @@ document.getElementById('app').addEventListener('click', (ev) => {
   render();
 });
 
-// --- Загрузка wasm-модуля --------------------------------------------------
+// --- Load the wasm module --------------------------------------------------
 
 (async function boot() {
   try {
@@ -431,7 +432,7 @@ document.getElementById('app').addEventListener('click', (ev) => {
         <div class="panel-title">WebAssembly failed to load</div>
         <div class="detail">${String(err)}
 
-Если среда запрещает исполнение WebAssembly (жёсткая CSP), откройте web/index.html из репозитория локально в браузере.</div>
+If the environment forbids WebAssembly (strict CSP), open web/index.html from the repository locally in a browser.</div>
       </div>`;
   }
 })();

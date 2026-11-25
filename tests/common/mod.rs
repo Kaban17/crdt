@@ -1,14 +1,15 @@
-//! Общие proptest-стратегии: генерация произвольных состояний CRDT
-//! через последовательности операций трейта `Update`.
+//! Shared proptest strategies: generate arbitrary CRDT states by
+//! sequences of `Update` operations.
 //!
-//! Благодаря ассоциированному типу `Update::Op` генерация универсальна:
-//! стратегия операций задаётся один раз на тип, а произвольное
-//! **достижимое** состояние — это свёртка списка операций ([`build`]).
-//! Тесты проверяют законы именно на достижимых состояниях, как и требует
-//! теория, а приватность полей гарантирует, что других не бывает.
+//! Thanks to the associated type `Update::Op`, generation is
+//! universal: the operation strategy is given once per type, and an
+//! arbitrary **reachable** state is a fold of a list of operations
+//! ([`build`]). Tests check the laws on reachable states, as the
+//! theory requires, and field privacy guarantees that no other states
+//! exist.
 
-// Модуль компилируется в каждый тестовый бинарник отдельно,
-// и каждый использует своё подмножество стратегий.
+// The module is compiled into each test binary separately, and each
+// uses its own subset of the strategies.
 #![allow(dead_code)]
 
 use proptest::prelude::*;
@@ -18,12 +19,12 @@ use crdt_lab::{
     VClock,
 };
 
-/// Небольшой алфавит акторов: коллизии между репликами вероятны,
-/// что даёт более жёсткую проверку слияния.
+/// Small alphabet of actors: collisions between replicas are likely,
+/// which makes merge checks stricter.
 pub type ActorId = u8;
 
-/// Свёртка списка операций в состояние — универсальный генератор
-/// достижимых состояний для любого `T: Update + Default`.
+/// Fold a list of operations into a state: a universal generator of
+/// reachable states for any `T: Update + Default`.
 pub fn build<T: Update + Default>(ops: Vec<T::Op>) -> T {
     let mut state = T::default();
     for op in ops {
@@ -41,7 +42,7 @@ where
     proptest::collection::vec(op, 0..12).prop_map(build)
 }
 
-// --- Операции ---
+// --- Operations ---
 
 pub fn vclock_op() -> impl Strategy<Value = ActorId> {
     0..4u8
@@ -77,7 +78,7 @@ pub fn orset_op() -> impl Strategy<Value = orset::Op<ActorId, u8>> {
     ]
 }
 
-// --- Состояния ---
+// --- States ---
 
 pub fn vclock() -> impl Strategy<Value = VClock<ActorId>> {
     states(vclock_op())
@@ -107,7 +108,7 @@ pub fn orset() -> impl Strategy<Value = OrSet<ActorId, u8>> {
     states(orset_op())
 }
 
-/// ORSWOT использует тот же алфавит операций, что и OR-Set.
+/// ORSWOT uses the same alphabet of operations as OR-Set.
 pub fn orswot() -> impl Strategy<Value = Orswot<ActorId, u8>> {
     states(orset_op())
 }

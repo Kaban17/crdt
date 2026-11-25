@@ -1,116 +1,108 @@
 # crdt-lab
 
-Кодовая база к научной работе **«Реализация и анализ свойств сходимости CRDT
-средствами системы типов Rust»**.
+A small Rust library of state-based CRDTs (CvRDTs). Replica states form a
+join-semilattice, local operations are inflationary, and merge is the join
+operation `⊔`. Strong eventual consistency (SEC) follows from that
+(Shapiro et al., 2011).
 
-## Идея
+The crate encodes as much of this specification as the Rust type system
+will take:
 
-Состояние-ориентированный CRDT (CvRDT) — это тип, состояния которого образуют
-полурешётку соединения, локальные операции инфляционны, а слияние реплик —
-операция `⊔`. Из этого следует сильная согласованность в конечном счёте (SEC,
-Shapiro et al., 2011).
+- **Trait as algebraic signature.** `JoinSemilattice` (`src/lattice.rs`)
+  fixes the `join` operation. The order `≤` is derived from it
+  (`a ≤ b ⟺ a ⊔ b = b`), so the order and the merge cannot disagree.
+- **Blanket impl as a theorem.** `CvRdt` is implemented automatically for
+  any join-semilattice: the correspondence "semilattice ⇒ CvRDT" is
+  pinned at the type level.
+- **Lattice composition.** `PnCounter` is a product of two `GCounter`s,
+  `OrSet` a product of three growing structures. Laws hold
+  componentwise.
+- **Laws as property tests.** Equations the type system cannot express
+  are checked by generic proptest suites, written once for any
+  `T: JoinSemilattice` and instantiated by a macro (`tests/laws.rs`).
+  A new CRDT is wired into the suite with a single line.
+- **Operations as an associated type.** The `Update` trait (`Op` + `apply`)
+  generalizes the second hypothesis of the convergence theorem —
+  inflation of operations (`a ≤ apply(a, op)`) — to one property test
+  for every type. The same trait is a generator of reachable states:
+  a state is a fold of a list of operations.
+- **Protocol invariants as typed errors.** History invariants (unique LWW
+  and `Dot` tags, injectivity of "clock → value" for the MV-register)
+  are not expressible statically, but a violation is observable from a
+  pair of states: `ValidateMerge` returns it as a `Result` with a
+  precise witness (`tests/validation.rs`). `GCounter` and `GSet` have
+  no observable contradictions; the missing impl is itself a result of
+  the analysis.
+- **Semantics as model-based tests.** Convergence does not imply that
+  the value is the intended one, so the observed state is also checked
+  against a reference model (`tests/semantics.rs`): OR-Set against
+  add-wins, LWW against the maximum of writes, MV-register against the
+  set of last concurrent replica writes.
+- **OR-Set vs ORSWOT** is semantics versus state size. A tombstone
+  OR-Set keeps an unbounded history; ORSWOT (`src/orswot.rs`, Bieniusa
+  et al. 2012) replaces tombstones with a causal context and deletes
+  tags physically. Observed semantics match (differential test).
+  `remove` structurally shrinks the state and stays inflationary in
+  the derived order: the semilattice order measures knowledge, not
+  size.
+- **Op-based model for comparison.** The other CRDT class is CmRDT
+  (`src/cmrdt.rs`): replicas exchange operations. Convergence rests
+  on commutativity of `effect` and on transport assumptions (causal
+  delivery, exactly-once) that types cannot capture. A small causal
+  broadcast model on `VClock` (`tests/cmrdt.rs`) checks convergence
+  under admissible delivery orders; a counter-test shows divergence
+  of an op-based OR-Set when those assumptions fail.
+- **LWW vs MV-register** shows the conflict-resolution spectrum:
+  a deterministic single winner (and lost updates) versus keeping
+  every concurrent value and resolving on read.
 
-Работа исследует, какую часть этой спецификации можно «переложить» на систему
-типов Rust:
+## Layout
 
-- **Трейт как алгебраическая сигнатура.** `JoinSemilattice` (`src/lattice.rs`)
-  фиксирует операцию `join`; порядок `≤` не пишется вручную, а *выводится* из
-  неё (`a ≤ b ⟺ a ⊔ b = b`), поэтому рассогласовать порядок и слияние
-  невозможно по построению.
-- **Blanket impl как теорема.** `CvRdt` реализован автоматически для любой
-  полурешётки: соответствие «полурешётка ⇒ CvRDT» закреплено на уровне типов.
-- **Композиция решёток.** `PnCounter` — произведение двух `GCounter`,
-  `OrSet` — произведение трёх растущих структур; законы наследуются
-  покомпонентно.
-- **Законы — property-based тестами.** То, что система типов Rust выразить не
-  может (сами уравнения), проверяется обобщёнными proptest-тестами, написанными
-  один раз для любого `T: JoinSemilattice` и инстанцируемыми макросом
-  (`tests/laws.rs`). Новый CRDT подключается к проверке одной строкой.
-- **Операции — ассоциированным типом.** Трейт `Update` (`Op` + `apply`)
-  обобщает второе условие теоремы о сходимости — инфляционность операций
-  (`a ≤ apply(a, op)`) — до одного property-теста на все типы; он же даёт
-  универсальный генератор достижимых состояний: состояние = свёртка списка
-  операций.
-- **Протокольные инварианты — типизированными ошибками.** Инварианты
-  корректных историй (уникальность меток LWW и `Dot`, инъективность
-  «часы → значение» MV-регистра) статически невыразимы, но их нарушение
-  наблюдаемо по паре состояний: трейт `ValidateMerge` возвращает его как
-  `Result` с точным свидетельством (`tests/validation.rs`). У
-  `GCounter`/`GSet` наблюдаемых противоречий нет — отсутствие реализации
-  само является результатом анализа.
-- **Семантика — model-based тестами.** Сходимость не гарантирует
-  правильности значения, поэтому наблюдаемое состояние дополнительно
-  сверяется с эталонной моделью (`tests/semantics.rs`): OR-Set — с
-  add-wins спецификацией, LWW — с максимумом записей, MV-регистр — с
-  множеством последних записей реплик.
-- **Пара OR-Set / ORSWOT** — семантика против размера состояния: у
-  надгробного OR-Set след истории растёт неограниченно, ORSWOT
-  (`src/orswot.rs`, Bieniusa et al. 2012) заменяет надгробия причинным
-  контекстом и удаляет метки физически. Наблюдаемая семантика совпадает
-  (дифференциальный тест), а `remove`, структурно *уменьшающий*
-  состояние, остаётся инфляционным в выводимом порядке — порядок
-  полурешётки измеряет знание, а не размер.
-- **Op-based модель для сравнения.** Второй класс CRDT — CmRDT
-  (`src/cmrdt.rs`): реплики обмениваются операциями, сходимость держится
-  на коммутативности `effect` **и** предпосылках о транспорте (причинная
-  доставка, exactly-once), которые в типах невыразимы. Мини-модель
-  причинного broadcast на `VClock` (`tests/cmrdt.rs`) проверяет сходимость
-  при допустимых порядках доставки, а контр-тест показывает расходимость
-  op-based OR-Set при их нарушении — честная граница подхода.
-- **Пара LWW / MV-регистр** демонстрирует спектр разрешения конфликтов:
-  детерминированный выбор одного победителя (и потерянные обновления)
-  против сохранения всех конкурентных значений с разрешением на читателе.
-
-## Структура
-
-| Путь | Содержимое |
+| Path | Contents |
 |---|---|
-| `src/lattice.rs` | `JoinSemilattice`, `Update`, `CvRdt`, `Actor` — ядро |
-| `src/vclock.rs` | векторные часы, `PartialOrd` = «произошло-до» |
-| `src/gcounter.rs` | растущий счётчик |
-| `src/pncounter.rs` | счётчик с декрементом (произведение решёток) |
-| `src/gset.rs` | растущее множество |
-| `src/lww.rs` | LWW-регистр (лексикографический максимум) |
-| `src/mvreg.rs` | MV-регистр: конкурентные записи сохраняются (антицепь часов) |
-| `src/orset.rs` | OR-Set с надгробиями, семантика add-wins |
-| `src/orswot.rs` | ORSWOT: OR-Set без надгробий, причинный контекст |
-| `src/cmrdt.rs` | op-based модель (CmRDT): `OpCounter`, `OpOrSet` |
-| `tests/common/mod.rs` | proptest-стратегии: состояние = свёртка операций `Update` |
-| `tests/laws.rs` | обобщённые законы полурешётки и инфляционности для всех типов |
-| `tests/convergence.rs` | имитация реплик: SEC, неподвижная точка |
-| `tests/validation.rs` | валидация протокольных инвариантов (`ValidateMerge`) |
-| `tests/cmrdt.rs` | причинный broadcast: сходимость CmRDT и контр-тест расходимости |
-| `tests/semantics.rs` | model-based тесты: сверка с эталонной последовательной моделью |
-| `wasm/` | крейт `crdt-wasm`: WebAssembly-биндинги библиотеки для демонстрации |
-| `web/index.html` | интерактивная демонстрация (playground), генерируется `web/build.sh` |
+| `src/lattice.rs` | `JoinSemilattice`, `Update`, `CvRdt`, `Actor` — core |
+| `src/vclock.rs` | vector clocks, `PartialOrd` = happened-before |
+| `src/gcounter.rs` | grow-only counter |
+| `src/pncounter.rs` | counter with decrement (product of lattices) |
+| `src/gset.rs` | grow-only set |
+| `src/lww.rs` | LWW register (lexicographic maximum) |
+| `src/mvreg.rs` | MV-register: concurrent writes are kept (clock antichain) |
+| `src/orset.rs` | OR-Set with tombstones, add-wins semantics |
+| `src/orswot.rs` | ORSWOT: OR-Set without tombstones, causal context |
+| `src/cmrdt.rs` | op-based model (CmRDT): `OpCounter`, `OpOrSet` |
+| `tests/common/mod.rs` | proptest strategies: state = fold of `Update` operations |
+| `tests/laws.rs` | generic semilattice and inflation laws for every type |
+| `tests/convergence.rs` | replica simulation: SEC, fixed point |
+| `tests/validation.rs` | protocol-invariant validation (`ValidateMerge`) |
+| `tests/cmrdt.rs` | causal broadcast: CmRDT convergence and a divergence counter-test |
+| `tests/semantics.rs` | model-based tests against a sequential reference |
+| `wasm/` | `crdt-wasm` crate: WebAssembly bindings for the demo |
+| `web/index.html` | interactive playground, generated by `web/build.sh` |
 
-## Команды
+## Commands
 
 ```sh
-cargo test              # все тесты (юнит + property-based + doc-тесты)
-cargo doc --open        # документация с теоретическими комментариями
+cargo test              # all tests (unit + property-based + doctests)
+cargo doc --open        # API docs with theoretical comments
 cargo clippy --all-targets
 ```
 
-Интерактивная демонстрация: открыть `web/index.html` в браузере — один
-самодостаточный файл, **исполняющий настоящий код библиотеки**: крейт
-`wasm/` компилируется в WebAssembly и встраивается в страницу (base64).
-Три реплики применяют операции локально; линки сети можно отключать,
-имитируя разделение, и наблюдать расхождение и сходимость после `Sync All`.
-JS отвечает только за презентацию — все `join` и операции выполняет Rust.
-Пересборка после изменения библиотеки: `./web/build.sh` (нужны
-`wasm32-unknown-unknown` target и `wasm-pack`); правки интерфейса — в
-`web/playground.template.html`, `web/index.html` генерируется.
+Interactive demo: open `web/index.html` in a browser. It is a single
+self-contained file that runs the real library: the `wasm/` crate is
+compiled to WebAssembly and embedded in the page (base64). Three
+replicas apply operations locally; network links can be cut to
+simulate a partition, then `Sync All` shows divergence and
+convergence. JS is presentation only; every `join` and operation
+runs in Rust. Rebuild after library changes with `./web/build.sh`
+(needs the `wasm32-unknown-unknown` target and `wasm-pack`). Edit
+the UI in `web/playground.template.html`; `web/index.html` is
+generated.
 
-CI (`.github/workflows/ci.yml`) прогоняет на каждый push и pull request:
-`cargo fmt --check`, `clippy -D warnings`, все тесты, сборку документации
-с `-D warnings`, плюс отдельную job на MSRV (Rust 1.85).
+CI (`.github/workflows/ci.yml`) runs on every push and pull request:
+`cargo fmt --check`, `clippy -D warnings`, the full test suite, docs
+with `-D warnings`, and a separate job for the MSRV (Rust 1.85).
 
-## Литература
-
-Полная библиография в формате BibTeX — [`references.bib`](references.bib)
-(разбита по главам: фундамент, верификация сходимости, op-based/delta,
-практические системы, инструменты верификации Rust). Ключевые работы:
+## References
 
 - M. Shapiro, N. Preguiça, C. Baquero, M. Zawirski. *Conflict-free Replicated
   Data Types.* SSS 2011.

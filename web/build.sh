@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Сборка интерактивной демонстрации: crdt-lab → wasm → единый web/index.html.
-# Требует: rustup target wasm32-unknown-unknown, wasm-pack, python3.
+# Build the interactive demo: crdt-lab → wasm → a single web/index.html.
+# Requires: rustup target wasm32-unknown-unknown, wasm-pack, python3.
 set -e
 cd "$(dirname "$0")/.."
 

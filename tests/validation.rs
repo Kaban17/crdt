@@ -1,21 +1,23 @@
-//! Тесты типизированной валидации протокольных инвариантов (`ValidateMerge`).
+//! Tests of typed validation of protocol invariants (`ValidateMerge`).
 //!
-//! Две группы:
+//! Two groups:
 //!
-//! * property-тесты «валидные истории никогда не дают ошибку»: история
-//!   валидна, когда каждый актор живёт ровно на одной реплике (и, для LWW,
-//!   значение записи детерминированно определяется её меткой);
-//! * ручные сценарии, нарушающие каждый инвариант, — ошибка обязана
-//!   обнаружиться и нести точное свидетельство нарушения.
+//! * property tests "valid histories never produce an error": a
+//!   history is valid when each actor lives on exactly one replica
+//!   (and, for LWW, the value of a write is a deterministic function
+//!   of its stamp);
+//! * hand-written scenarios that break each invariant: the error must
+//!   be detected and carry a precise witness of the violation.
 
 use crdt_lab::{lww, mvreg, orset, JoinSemilattice, LwwRegister, MvRegister, OrSet, ValidateMerge};
 use proptest::collection::vec;
 use proptest::prelude::*;
 
-// --- Валидные истории: ошибок нет ---
+// --- Valid histories: no errors ---
 
 proptest! {
-    /// LWW: акторы разнесены по репликам, значение — функция метки.
+    /// LWW: actors are split across replicas, the value is a function
+    /// of the stamp.
     #[test]
     fn lww_valid_histories_never_error(
         ts_a in vec(0u64..40, 0..16),
@@ -35,8 +37,8 @@ proptest! {
         prop_assert!(merged.validate_merge(&b).is_ok());
     }
 
-    /// OR-Set: каждая реплика выдаёт метки только от собственного актора;
-    /// посередине истории — обмен состояниями.
+    /// OR-Set: each replica issues tags only from its own actor;
+    /// midway through the history there is an exchange of states.
     #[test]
     fn orset_valid_histories_never_error(
         ops1_a in set_ops(), ops1_b in set_ops(),
@@ -57,8 +59,8 @@ proptest! {
         prop_assert!(b.validate_merge(&a).is_ok());
     }
 
-    /// MV-регистр: каждая реплика пишет от собственного актора;
-    /// посередине истории — обмен состояниями.
+    /// MV-register: each replica writes from its own actor;
+    /// midway through the history there is an exchange of states.
     #[test]
     fn mvreg_valid_histories_never_error(
         vals1_a in vec(any::<u8>(), 0..8), vals1_b in vec(any::<u8>(), 0..8),
@@ -113,9 +115,9 @@ fn run_set(set: &mut OrSet<&'static str, u8>, actor: &'static str, ops: &[SetOp]
     }
 }
 
-// --- Нарушенные инварианты: ошибка с точным свидетельством ---
+// --- Broken invariants: an error with a precise witness ---
 
-/// LWW: один актор выдал одну метку времени двум разным значениям.
+/// LWW: one actor issued one timestamp to two different values.
 #[test]
 fn lww_detects_stamp_reuse() {
     let mut a = LwwRegister::new("x", "");
@@ -133,7 +135,7 @@ fn lww_detects_stamp_reuse() {
     );
 }
 
-/// LWW: совпадение полного состояния (включая значение) — не нарушение.
+/// LWW: matching full state (including the value) is not a violation.
 #[test]
 fn lww_identical_stamps_same_value_are_valid() {
     let mut a = LwwRegister::new("x", "");
@@ -142,20 +144,20 @@ fn lww_identical_stamps_same_value_are_valid() {
     assert!(a.validate_merge(&b).is_ok());
 }
 
-/// OR-Set: один актор сгенерировал метки на двух репликах — коллизия Dot.
+/// OR-Set: one actor generated tags on two replicas: a Dot collision.
 #[test]
 fn orset_detects_dot_collision() {
     let mut a: OrSet<&str, &str> = OrSet::new();
     let mut b: OrSet<&str, &str> = OrSet::new();
     a.add("x", "apple");
-    b.add("x", "banana"); // тот же актор с нуля → Dot("x", 1) вторично
+    b.add("x", "banana"); // the same actor from zero → Dot("x", 1) again
     let err = a.validate_merge(&b).unwrap_err();
     assert_eq!(*err.dot.actor(), "x");
     assert_eq!(err.dot.counter(), 1);
     assert_eq!(err.items, ("apple", "banana"));
 }
 
-/// OR-Set: общая история (одна метка у одного элемента) — не нарушение.
+/// OR-Set: a shared history (one tag on one element) is not a violation.
 #[test]
 fn orset_shared_history_is_valid() {
     let mut a: OrSet<&str, &str> = OrSet::new();
@@ -166,20 +168,20 @@ fn orset_shared_history_is_valid() {
     assert!(b.validate_merge(&a).is_ok());
 }
 
-/// MV-регистр: один актор выдал один номер события двум значениям —
-/// равные часы с разными значениями.
+/// MV-register: one actor issued one event number to two values —
+/// equal clocks with different values.
 #[test]
 fn mvreg_detects_clock_collision() {
     let mut a: MvRegister<&str, i32> = MvRegister::new();
     let mut b: MvRegister<&str, i32> = MvRegister::new();
     a.write("x", 1);
-    b.write("x", 2); // оба состояния несут часы {x: 1}
+    b.write("x", 2); // both states carry the clock {x: 1}
     let err = a.validate_merge(&b).unwrap_err();
     assert_eq!(err.clock.get(&"x"), 1);
     assert_eq!(err.values, (1, 2));
 }
 
-/// Ошибки — полноценные `std::error::Error` с осмысленным сообщением.
+/// Errors are proper `std::error::Error` values with a meaningful message.
 #[test]
 fn merge_errors_implement_error() {
     fn check(err: &(impl std::error::Error + ?Sized)) {

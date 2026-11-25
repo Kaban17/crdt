@@ -1,21 +1,21 @@
-//! Векторные часы — каноническая полурешётка и строительный блок CRDT.
+//! Vector clocks: the canonical semilattice and a building block of CRDTs.
 
 use std::collections::BTreeMap;
 
 use crate::lattice::{Actor, JoinSemilattice, Update};
 
-/// Векторные часы: отображение `актор → счётчик событий`.
+/// Vector clock: a map `actor → event count`.
 ///
-/// Полурешётка с покомпонентным максимумом. Отсутствующая компонента
-/// считается равной нулю, поэтому пустые часы — наименьший элемент (`⊥`).
+/// A semilattice under componentwise maximum. A missing component is
+/// treated as zero, so the empty clock is the least element (`⊥`).
 ///
-/// Помимо [`JoinSemilattice`], тип реализует [`PartialOrd`]: два вектора
-/// **несравнимы** тогда и только тогда, когда соответствующие события
-/// конкурентны (ни одно не «произошло-до» другого, отношение Лампорта).
-/// Это пример того, как частичный порядок теории напрямую отображается
-/// в стандартный трейт Rust.
+/// Besides [`JoinSemilattice`], the type implements [`PartialOrd`]: two
+/// vectors are **incomparable** if and only if the corresponding events
+/// are concurrent (neither happened-before the other, Lamport's
+/// relation). The theoretical partial order maps directly onto a
+/// standard Rust trait.
 ///
-/// # Пример
+/// # Example
 ///
 /// ```
 /// use crdt_lab::{VClock, JoinSemilattice};
@@ -25,10 +25,10 @@ use crate::lattice::{Actor, JoinSemilattice, Update};
 /// a.increment("a");
 /// b.increment("b");
 ///
-/// // события конкурентны: векторы несравнимы
+/// // concurrent events: the vectors are incomparable
 /// assert_eq!(a.partial_cmp(&b), None);
 ///
-/// // join — точная верхняя грань
+/// // join is the least upper bound
 /// let ab = a.clone().joined(&b);
 /// assert!(a.leq(&ab) && b.leq(&ab));
 /// ```
@@ -38,42 +38,43 @@ pub struct VClock<A: Actor> {
 }
 
 impl<A: Actor> VClock<A> {
-    /// Пустые часы — наименьший элемент полурешётки.
+    /// Empty clock: the least element of the semilattice.
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
         }
     }
 
-    /// Счётчик событий актора (0, если актор ещё не наблюдался).
+    /// Event count of an actor (0 if the actor has not been observed).
     pub fn get(&self, actor: &A) -> u64 {
         self.entries.get(actor).copied().unwrap_or(0)
     }
 
-    /// Зарегистрировать событие актора. Инфляционно: `self ≤ self'`.
+    /// Record an event of `actor`. Inflationary: `self ≤ self'`.
     pub fn increment(&mut self, actor: A) {
         *self.entries.entry(actor).or_insert(0) += 1;
     }
 
-    /// Покомпонентное сравнение `self ≤ other`.
+    /// Componentwise comparison `self ≤ other`.
     fn dominated_by(&self, other: &Self) -> bool {
         self.entries.iter().all(|(a, &n)| n <= other.get(a))
     }
 
-    /// Произвольный **тотальный** порядок по представлению — для
-    /// канонизации коллекций часов (см. [`MvRegister`](crate::MvRegister)).
+    /// An arbitrary **total** order on the representation, used to
+    /// canonicalize collections of clocks (see
+    /// [`MvRegister`](crate::MvRegister)).
     ///
-    /// С причинным порядком [`PartialOrd`] не связан и потому намеренно
-    /// не выставлен наружу как `Ord`: тотальный `Ord`, противоречащий
-    /// частичному `PartialOrd`, нарушил бы контракт стандартной
-    /// библиотеки — ещё один сюжет о границах системы типов.
+    /// It is unrelated to the causal [`PartialOrd`] and is therefore
+    /// deliberately not exposed as `Ord`: a total `Ord` that
+    /// contradicts a partial `PartialOrd` would violate the standard
+    /// library contract.
     pub(crate) fn repr_cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.entries.cmp(&other.entries)
     }
 }
 
 impl<A: Actor> JoinSemilattice for VClock<A> {
-    /// Покомпонентный максимум.
+    /// Componentwise maximum.
     fn join(&mut self, other: &Self) {
         for (actor, &n) in &other.entries {
             let e = self.entries.entry(actor.clone()).or_insert(0);
@@ -83,7 +84,7 @@ impl<A: Actor> JoinSemilattice for VClock<A> {
 }
 
 impl<A: Actor> Update for VClock<A> {
-    /// Операция — идентификатор актора, зарегистрировавшего событие.
+    /// Operation: identifier of the actor that recorded an event.
     type Op = A;
 
     fn apply(&mut self, actor: A) {
@@ -98,7 +99,7 @@ impl<A: Actor> PartialOrd for VClock<A> {
             (true, true) => Some(Equal),
             (true, false) => Some(Less),
             (false, true) => Some(Greater),
-            (false, false) => None, // конкурентные события
+            (false, false) => None, // concurrent events
         }
     }
 }
@@ -127,8 +128,8 @@ mod tests {
         assert!(!a.leq(&b) && !b.leq(&a));
     }
 
-    /// Выведенный из `join` порядок совпадает с «произошло-до» из
-    /// `PartialOrd` — согласованность двух определений.
+    /// The order derived from `join` agrees with happened-before from
+    /// `PartialOrd`: the two definitions are consistent.
     #[test]
     fn derived_order_agrees_with_partial_ord() {
         let mut a = VClock::new();

@@ -1,29 +1,31 @@
-//! PN-Counter — счётчик с инкрементом и декрементом.
+//! PN-Counter: a counter with increment and decrement.
 
 use crate::gcounter::GCounter;
 use crate::lattice::{Actor, JoinSemilattice, Update};
 
-/// Операция над [`PnCounter`].
+/// Operation on a [`PnCounter`].
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Op<A: Actor> {
-    /// Увеличить счётчик на 1 от имени актора.
+    /// Increment the counter by 1 on behalf of an actor.
     Inc(A),
-    /// Уменьшить счётчик на 1 от имени актора.
+    /// Decrement the counter by 1 on behalf of an actor.
     Dec(A),
 }
 
-/// Счётчик с увеличением *и* уменьшением.
+/// Counter with both increment *and* decrement.
 ///
-/// Декремент — не инфляционная операция для обычного числа, поэтому тип
-/// строится как **произведение двух полурешёток**: пара растущих счётчиков
-/// «плюсов» и «минусов». Произведение полурешёток с покомпонентным `join`
-/// снова полурешётка — это свойство композиции библиотека использует
-/// напрямую: `join` пары делегирует в `join` компонент, и законы
-/// наследуются по построению.
+/// Decrement is not an inflationary operation on an ordinary number, so
+/// the type is built as a **product of two semilattices**: a pair of
+/// grow-only counters of "pluses" and "minuses". A product of
+/// semilattices with componentwise `join` is again a semilattice. The
+/// library uses that composition property directly: `join` of the pair
+/// delegates to `join` of the components, and the laws are inherited
+/// by construction.
 ///
-/// Значение — разность `plus - minus` (вычисляется в `i64`).
+/// The observed value is the difference `plus - minus` (computed in
+/// `i64`).
 ///
-/// # Пример
+/// # Example
 ///
 /// ```
 /// use crdt_lab::{PnCounter, CvRdt};
@@ -44,7 +46,7 @@ pub struct PnCounter<A: Actor> {
 }
 
 impl<A: Actor> PnCounter<A> {
-    /// Нулевой счётчик.
+    /// Zero counter.
     pub fn new() -> Self {
         Self {
             plus: GCounter::new(),
@@ -52,38 +54,39 @@ impl<A: Actor> PnCounter<A> {
         }
     }
 
-    /// Увеличить счётчик на 1 от имени актора.
+    /// Increment the counter by 1 on behalf of an actor.
     pub fn increment(&mut self, actor: A) {
         self.plus.increment(actor);
     }
 
-    /// Уменьшить счётчик на 1 от имени актора.
+    /// Decrement the counter by 1 on behalf of an actor.
     ///
-    /// В решётке состояний операция всё же *инфляционная*: растёт
-    /// компонента `minus`, хотя видимое значение убывает. Разделение
-    /// «порядок состояний» / «видимое значение» — ключ к декременту.
+    /// In the lattice of states the operation is still *inflationary*:
+    /// the `minus` component grows, even though the observed value
+    /// decreases. The split between "order of states" and "observed
+    /// value" is what makes decrement work.
     pub fn decrement(&mut self, actor: A) {
         self.minus.increment(actor);
     }
 
-    /// Текущее значение: сумма плюсов минус сумма минусов.
+    /// Current value: sum of pluses minus sum of minuses.
     pub fn value(&self) -> i64 {
         self.plus.value() as i64 - self.minus.value() as i64
     }
 
-    /// Компонента инкрементов (для наблюдения за структурой состояния).
+    /// Increment component (for inspecting the structure of the state).
     pub fn plus(&self) -> &GCounter<A> {
         &self.plus
     }
 
-    /// Компонента декрементов (для наблюдения за структурой состояния).
+    /// Decrement component (for inspecting the structure of the state).
     pub fn minus(&self) -> &GCounter<A> {
         &self.minus
     }
 }
 
 impl<A: Actor> JoinSemilattice for PnCounter<A> {
-    /// Покомпонентный `join` произведения полурешёток.
+    /// Componentwise `join` of the product of semilattices.
     fn join(&mut self, other: &Self) {
         self.plus.join(&other.plus);
         self.minus.join(&other.minus);
@@ -112,7 +115,7 @@ mod tests {
         let before = c.clone();
         c.decrement("a");
         assert_eq!(c.value(), 0);
-        assert!(before.leq(&c)); // состояние выросло
+        assert!(before.leq(&c)); // the state grew
     }
 
     #[test]

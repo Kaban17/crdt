@@ -1,21 +1,22 @@
-//! Проверка **семантики** против эталонной последовательной модели.
+//! Checks of **semantics** against a sequential reference model.
 //!
-//! Законы решётки и SEC-имитация гарантируют, что реплики сойдутся, но не
-//! говорят, что они сойдутся к *правильному* значению: сходиться можно и к
-//! пустому множеству. Этот файл закрывает пробел приёмом model-based
-//! testing (ср. «Testing CRDTs in Rust, From Theory to Practice», где так
-//! была найдена ошибка в опубликованной статье): наблюдаемое состояние
-//! CRDT сверяется с простой заведомо корректной моделью.
+//! Lattice laws and the SEC simulation guarantee that replicas
+//! converge, but not that they converge to the *intended* value: they
+//! could equally converge to the empty set. This file closes the gap
+//! with model-based testing (cf. "Testing CRDTs in Rust, From Theory
+//! to Practice", where the same technique found a bug in a published
+//! paper): the observed CRDT state is compared with a simple,
+//! obviously correct model.
 //!
-//! Модели:
-//! * последовательная: одна реплика == обычная структура данных;
-//! * конкурентная (обмен в конце): спецификация из литературы —
-//!   add-wins для OR-Set, максимум по тотальному порядку для LWW,
-//!   множество последних записей реплик для MV-Register.
+//! Models:
+//! * sequential: one replica == an ordinary data structure;
+//! * concurrent (exchange at the end): the specification from the
+//!   literature — add-wins for OR-Set, maximum in a total order for
+//!   LWW, the set of last replica writes for MV-Register.
 //!
-//! Модель конкурентного прогона проста, потому что реплики не общаются
-//! до финального обмена: внутри реплики операции причинно упорядочены,
-//! между репликами — попарно конкурентны.
+//! The concurrent-run model is simple because replicas do not talk
+//! until the final exchange: operations are causally ordered inside a
+//! replica and pairwise concurrent across replicas.
 
 mod common;
 
@@ -26,7 +27,7 @@ use crdt_lab::orset::Op as SetOp;
 use crdt_lab::{JoinSemilattice, LwwRegister, MvRegister, OrSet, Orswot, Update};
 use proptest::prelude::*;
 
-/// Слить состояния всех реплик в одно.
+/// Merge the states of all replicas into one.
 fn converge<T: JoinSemilattice>(replicas: &[T]) -> T {
     let mut result = replicas[0].clone();
     for r in &replicas[1..] {
@@ -35,10 +36,11 @@ fn converge<T: JoinSemilattice>(replicas: &[T]) -> T {
     result
 }
 
-/// Эталон add-wins для прогона «обмен только в конце»: элемент присутствует,
-/// если на какой-то реплике есть его вставка, не отменённая **последующим**
-/// удалением на той же реплике (удаления чужих реплик конкурентны вставке
-/// и по спецификации проигрывают).
+/// Add-wins reference for a "exchange only at the end" run: an
+/// element is present if some replica has an insertion of it that is
+/// not cancelled by a **later** deletion on the same replica
+/// (deletions on other replicas are concurrent with the insertion and
+/// lose by the specification).
 fn addwins_model(per_replica: &[Vec<SetOp<ActorId, u8>>]) -> BTreeSet<u8> {
     let mut expected = BTreeSet::new();
     for ops in per_replica {
@@ -57,7 +59,7 @@ fn addwins_model(per_replica: &[Vec<SetOp<ActorId, u8>>]) -> BTreeSet<u8> {
 }
 
 proptest! {
-    /// Одна реплика OR-Set неотличима от обычного множества.
+    /// A single OR-Set replica is indistinguishable from an ordinary set.
     #[test]
     fn orset_sequential_matches_plain_set(
         ops in proptest::collection::vec(common::orset_op(), 0..24)
@@ -75,14 +77,15 @@ proptest! {
         }
     }
 
-    /// Сошедшийся OR-Set равен эталону add-wins спецификации.
+    /// A converged OR-Set equals the add-wins reference of the
+    /// specification.
     #[test]
     fn orset_converged_matches_addwins_model(
         per_replica in proptest::collection::vec(
             proptest::collection::vec(common::orset_op(), 0..12), 3..=3
         )
     ) {
-        // уникальность меток: актор = номер реплики
+        // uniqueness of tags: actor = replica index
         let per_replica: Vec<Vec<SetOp<ActorId, u8>>> = per_replica
             .into_iter()
             .enumerate()
@@ -107,7 +110,7 @@ proptest! {
         prop_assert_eq!(observed, addwins_model(&per_replica));
     }
 
-    /// Одна реплика ORSWOT неотличима от обычного множества.
+    /// A single ORSWOT replica is indistinguishable from an ordinary set.
     #[test]
     fn orswot_sequential_matches_plain_set(
         ops in proptest::collection::vec(common::orset_op(), 0..24)
@@ -125,16 +128,17 @@ proptest! {
         }
     }
 
-    /// Дифференциальный тест: на одной истории надгробный OR-Set и ORSWOT
-    /// наблюдаемо совпадают — и с add-wins эталоном, и друг с другом.
-    /// Различие реализаций только в размере состояния, не в семантике.
+    /// Differential test: on the same history a tombstone OR-Set and
+    /// ORSWOT agree observably, both with the add-wins reference and
+    /// with each other. The implementations differ only in state size,
+    /// not in semantics.
     #[test]
     fn orswot_converged_matches_orset_and_addwins_model(
         per_replica in proptest::collection::vec(
             proptest::collection::vec(common::orset_op(), 0..12), 3..=3
         )
     ) {
-        // уникальность меток: актор = номер реплики
+        // uniqueness of tags: actor = replica index
         let per_replica: Vec<Vec<SetOp<ActorId, u8>>> = per_replica
             .into_iter()
             .enumerate()
@@ -163,8 +167,9 @@ proptest! {
         prop_assert_eq!(&orset, &model);
     }
 
-    /// Сошедшийся LWW-регистр хранит максимум всех записей по тотальному
-    /// порядку `(timestamp, actor, value)` — включая начальное состояние.
+    /// A converged LWW register holds the maximum of all writes in the
+    /// total order `(timestamp, actor, value)`, including the initial
+    /// state.
     #[test]
     fn lww_converged_is_max_write(
         per_replica in proptest::collection::vec(
@@ -182,7 +187,7 @@ proptest! {
             .iter()
             .flatten()
             .copied()
-            .chain([(0, 0, 0)]) // начальное состояние тоже участвует
+            .chain([(0, 0, 0)]) // the initial state also participates
             .max()
             .unwrap();
 
@@ -190,9 +195,10 @@ proptest! {
         prop_assert_eq!(*converged.value(), expected.2);
     }
 
-    /// Сошедшийся MV-регистр хранит в точности последние записи всех
-    /// писавших реплик: внутри реплики поздняя запись вытесняет раннюю,
-    /// между репликами записи конкурентны и выживают все.
+    /// A converged MV-register holds exactly the last writes of all
+    /// writing replicas: inside a replica a later write displaces an
+    /// earlier one; across replicas the writes are concurrent and all
+    /// survive.
     #[test]
     fn mvreg_converged_holds_last_write_of_each_replica(
         per_replica in proptest::collection::vec(

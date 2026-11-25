@@ -1,25 +1,26 @@
-//! OR-Set — множество с наблюдаемым удалением (observed-remove, add-wins).
+//! OR-Set: observed-remove set with add-wins semantics.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::lattice::{Actor, JoinSemilattice, Update, ValidateMerge};
 
-/// Операция над [`OrSet`] (и [`Orswot`](crate::Orswot) — общий алфавит
-/// операций позволяет сравнивать реализации на одних историях).
+/// Operation on an [`OrSet`] (and [`Orswot`](crate::Orswot): a shared
+/// alphabet of operations lets the two implementations be compared on
+/// the same histories).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Op<A: Actor, T> {
-    /// Вставить элемент от имени актора.
+    /// Insert an element on behalf of an actor.
     Add(A, T),
-    /// Удалить все наблюдаемые вхождения элемента.
+    /// Remove all observed occurrences of the element.
     Remove(T),
 }
 
-/// Уникальная метка события вставки: пара `(актор, порядковый номер)`.
+/// Unique tag of an insertion event: pair `(actor, sequence number)`.
 ///
-/// Newtype-обёртка не даёт перепутать метку с «обычной» парой и
-/// централизует инвариант уникальности: свежие метки выдаёт только
-/// [`OrSet::add`], увеличивая личный счётчик актора.
+/// The newtype keeps the tag from being mixed up with an ordinary pair
+/// and centralizes the uniqueness invariant: fresh tags are issued only
+/// by [`OrSet::add`], which increments the actor's personal counter.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Dot<A: Actor> {
     actor: A,
@@ -27,46 +28,48 @@ pub struct Dot<A: Actor> {
 }
 
 impl<A: Actor> Dot<A> {
-    /// Конструктор для op-based варианта ([`crate::cmrdt::OpOrSet`]):
-    /// там свежесть метки обеспечивает `prepare`-фаза источника, а не
-    /// этот модуль. Намеренно `pub(crate)`: снаружи крейта метки
-    /// по-прежнему невозможно изготовить вручную.
+    /// Constructor for the op-based variant ([`crate::cmrdt::OpOrSet`]):
+    /// there, freshness of the tag is ensured by the source's `prepare`
+    /// phase, not by this module. Deliberately `pub(crate)`: outside the
+    /// crate, tags still cannot be minted by hand.
     pub(crate) fn new(actor: A, counter: u64) -> Self {
         Self { actor, counter }
     }
 
-    /// Актор, выдавший метку.
+    /// Actor that issued the tag.
     pub fn actor(&self) -> &A {
         &self.actor
     }
 
-    /// Порядковый номер метки у актора.
+    /// Sequence number of the tag for that actor.
     pub fn counter(&self) -> u64 {
         self.counter
     }
 }
 
-/// Множество с поддержкой удаления и семантикой **add-wins**:
-/// при конкурентных `add(x)` и `remove(x)` элемент остаётся.
+/// Set with deletion and **add-wins** semantics: under concurrent
+/// `add(x)` and `remove(x)` the element remains.
 ///
-/// Наивное «множество с удалением» полурешёткой не является: удаление —
-/// не инфляционная операция. OR-Set решает это переводом обеих операций
-/// в рост состояния:
+/// A naive "set with deletion" is not a semilattice: deletion is not
+/// inflationary. OR-Set solves this by turning both operations into
+/// growth of the state:
 ///
-/// * `add(x)` помечает вставку свежей уникальной меткой ([`Dot`]);
-/// * `remove(x)` не трогает `x`, а добавляет в множество-надгробие
-///   (*tombstones*) **наблюдаемые** метки вставок `x`;
-/// * элемент присутствует, если у него есть метка вне надгробий.
+/// * `add(x)` tags the insertion with a fresh unique [`Dot`];
+/// * `remove(x)` does not touch `x`; it adds the **observed** insertion
+///   tags of `x` to a tombstone set;
+/// * the element is present if it has a tag outside the tombstones.
 ///
-/// Все три компоненты состояния (метки вставок, надгробия, счётчики
-/// акторов) — растущие структуры, их произведение — снова полурешётка.
-/// Add-wins следует из определения: конкурентная вставка несёт метку,
-/// которую удаление не наблюдало и потому не похоронило.
+/// All three state components (insertion tags, tombstones, actor
+/// counters) are growing structures; their product is again a
+/// semilattice. Add-wins follows from the definition: a concurrent
+/// insertion carries a tag that the deletion did not observe and
+/// therefore did not bury.
 ///
-/// Плата — неограниченный рост надгробий; оптимизированный вариант с
-/// причинным контекстом вместо надгробий — [`Orswot`](crate::Orswot).
+/// The cost is unbounded growth of tombstones; the optimized variant
+/// with a causal context instead of tombstones is
+/// [`Orswot`](crate::Orswot).
 ///
-/// # Пример
+/// # Example
 ///
 /// ```
 /// use crdt_lab::{OrSet, CvRdt};
@@ -75,24 +78,24 @@ impl<A: Actor> Dot<A> {
 /// a.add("a", "x");
 /// let mut b = a.clone();
 ///
-/// b.remove(&"x");   // b удаляет наблюдаемый "x"
-/// a.add("a", "x");  // a конкурентно вставляет "x" заново
+/// b.remove(&"x");   // b removes the observed "x"
+/// a.add("a", "x");  // a concurrently inserts "x" again
 ///
 /// a.merge(&b);
 /// assert!(a.contains(&"x")); // add-wins
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct OrSet<A: Actor, T: Ord + Clone> {
-    /// Живые метки вставок каждого элемента.
+    /// Live insertion tags of each element.
     entries: BTreeMap<T, BTreeSet<Dot<A>>>,
-    /// Надгробия: метки, чьё удаление было наблюдено.
+    /// Tombstones: tags whose deletion has been observed.
     tombstones: BTreeSet<Dot<A>>,
-    /// Личные счётчики акторов для выдачи свежих меток.
+    /// Per-actor counters used to issue fresh tags.
     counters: BTreeMap<A, u64>,
 }
 
 impl<A: Actor, T: Ord + Clone> OrSet<A, T> {
-    /// Пустое множество.
+    /// Empty set.
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -101,7 +104,7 @@ impl<A: Actor, T: Ord + Clone> OrSet<A, T> {
         }
     }
 
-    /// Вставить элемент от имени актора, пометив свежей меткой.
+    /// Insert an element on behalf of an actor, tagged with a fresh dot.
     pub fn add(&mut self, actor: A, item: T) {
         let counter = self.counters.entry(actor.clone()).or_insert(0);
         *counter += 1;
@@ -112,24 +115,25 @@ impl<A: Actor, T: Ord + Clone> OrSet<A, T> {
         self.entries.entry(item).or_default().insert(dot);
     }
 
-    /// Удалить элемент: похоронить все *наблюдаемые* метки его вставок.
+    /// Remove an element: bury all *observed* tags of its insertions.
     ///
-    /// Конкурентные (ещё не доставленные) вставки не затрагиваются —
-    /// отсюда семантика add-wins.
+    /// Concurrent (not yet delivered) insertions are not affected,
+    /// which is where add-wins comes from.
     pub fn remove(&mut self, item: &T) {
         if let Some(dots) = self.entries.get(item) {
             self.tombstones.extend(dots.iter().cloned());
         }
     }
 
-    /// Присутствует ли элемент: есть ли у него метка вне надгробий.
+    /// Whether the element is present: whether it has a tag outside
+    /// the tombstones.
     pub fn contains(&self, item: &T) -> bool {
         self.entries
             .get(item)
             .is_some_and(|dots| !dots.is_subset(&self.tombstones))
     }
 
-    /// Итератор по присутствующим элементам в возрастающем порядке.
+    /// Iterator over present elements in ascending order.
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.entries
             .iter()
@@ -137,27 +141,26 @@ impl<A: Actor, T: Ord + Clone> OrSet<A, T> {
             .map(|(item, _)| item)
     }
 
-    /// Число присутствующих элементов.
+    /// Number of present elements.
     pub fn len(&self) -> usize {
         self.iter().count()
     }
 
-    /// Пусто ли множество (с точки зрения наблюдателя).
+    /// Whether the set is empty (from an observer's point of view).
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Число надгробий — накопленных меток удалённых вставок.
-    /// Наблюдаемая метрика неограниченного роста состояния (см. план:
-    /// оптимизация через причинный контекст).
+    /// Number of tombstones: accumulated tags of deleted insertions.
+    /// Observable metric of unbounded state growth.
     pub fn tombstone_count(&self) -> usize {
         self.tombstones.len()
     }
 }
 
 impl<A: Actor, T: Ord + Clone> JoinSemilattice for OrSet<A, T> {
-    /// Покомпонентный `join`: объединение меток и надгробий,
-    /// покомпонентный максимум счётчиков.
+    /// Componentwise `join`: union of tags and tombstones,
+    /// componentwise maximum of counters.
     fn join(&mut self, other: &Self) {
         for (item, dots) in &other.entries {
             self.entries
@@ -173,19 +176,19 @@ impl<A: Actor, T: Ord + Clone> JoinSemilattice for OrSet<A, T> {
     }
 }
 
-/// Нарушение инварианта OR-Set: одна метка [`Dot`] прикреплена к разным
-/// элементам в двух состояниях.
+/// Violation of the OR-Set invariant: one [`Dot`] is attached to
+/// different elements in two states.
 ///
-/// Уникальность меток обеспечивается генератором ([`OrSet::add`]) только
-/// в пределах реплики; коллизия означает, что один актор работал на двух
-/// репликах одновременно (или счётчик актора был сброшен). После слияния
-/// такая метка «склеит» судьбу двух независимых вставок: одно `remove`
-/// похоронит обе.
+/// Uniqueness of tags is guaranteed by the generator ([`OrSet::add`])
+/// only within a replica; a collision means one actor was used on two
+/// replicas at once (or the actor's counter was reset). After merge
+/// such a tag "glues" the fate of two independent insertions: one
+/// `remove` will bury both.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MergeError<A: Actor, T: Ord + Clone> {
-    /// Метка, встретившаяся у разных элементов.
+    /// Tag that appeared on different elements.
     pub dot: Dot<A>,
-    /// Элементы, к которым метка прикреплена в `self` и `other`.
+    /// Elements the tag is attached to in `self` and `other`.
     pub items: (T, T),
 }
 
@@ -193,7 +196,7 @@ impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> fmt::Display for MergeE
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "метка {:?} прикреплена к разным элементам: {:?} и {:?}",
+            "tag {:?} is attached to different elements: {:?} and {:?}",
             self.dot, self.items.0, self.items.1
         )
     }
@@ -204,8 +207,8 @@ impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> std::error::Error for M
 impl<A: Actor, T: Ord + Clone> ValidateMerge for OrSet<A, T> {
     type Error = MergeError<A, T>;
 
-    /// Ошибка, если какая-то метка вставки прикреплена в двух состояниях
-    /// к разным элементам.
+    /// Error if some insertion tag is attached to different elements
+    /// in the two states.
     fn validate_merge(&self, other: &Self) -> Result<(), Self::Error> {
         let their_dots: BTreeMap<&Dot<A>, &T> = other
             .entries
@@ -259,7 +262,7 @@ mod tests {
         let mut b = a.clone();
 
         b.remove(&1);
-        a.add("a", 1); // конкурентная повторная вставка
+        a.add("a", 1); // concurrent re-insertion
 
         let m = a.joined(&b);
         assert!(m.contains(&1));
@@ -270,7 +273,7 @@ mod tests {
         let mut a: OrSet<&str, i32> = OrSet::new();
         let mut b: OrSet<&str, i32> = OrSet::new();
         b.add("b", 1);
-        // a не видела вставку и её remove ничего не хоронит
+        // a has not seen the insertion, so its remove buries nothing
         a.remove(&1);
         let m = a.joined(&b);
         assert!(m.contains(&1));
@@ -282,7 +285,7 @@ mod tests {
         a.add("a", 1);
         a.remove(&1);
         assert!(!a.contains(&1));
-        a.add("a", 1); // свежая метка не похоронена
+        a.add("a", 1); // the fresh tag is not buried
         assert!(a.contains(&1));
     }
 }

@@ -1,39 +1,41 @@
-//! Тесты op-based модели (CmRDT) с мини-моделью причинного broadcast.
+//! Tests of the op-based model (CmRDT) with a small causal-broadcast
+//! model.
 //!
-//! Транспорт моделируется явно: каждая операция снабжается векторными
-//! часами источника, доставка на реплику допустима только когда все
-//! причинные предшественники уже доставлены (условие причинного
-//! broadcast на `VClock`). Проверяется:
+//! Transport is modelled explicitly: each operation is tagged with the
+//! source's vector clock, and delivery to a replica is allowed only
+//! when all causal predecessors have already been delivered (the
+//! causal-broadcast condition on `VClock`). Checked:
 //!
-//! * [`OpCounter`] сходится при *любом* порядке доставки — его `effect`
-//!   коммутирует безусловно;
-//! * [`OpOrSet`] сходится при любом **причинно допустимом** порядке
-//!   доставки (property-тест по случайным историям и порядкам);
-//! * контр-тест: нарушение причинного порядка (Remove раньше своего Add)
-//!   разводит реплики op-based OR-Set навсегда — предпосылка о доставке
-//!   не выразима в типах и живёт в транспорте.
+//! * [`OpCounter`] converges under *any* delivery order: its `effect`
+//!   commutes unconditionally;
+//! * [`OpOrSet`] converges under any **causally admissible** delivery
+//!   order (a property test over random histories and orders);
+//! * counter-test: breaking causal order (Remove before its Add)
+//!   diverges op-based OR-Set replicas forever. The delivery
+//!   hypothesis is not expressible in types and lives in the
+//!   transport.
 
 use crdt_lab::cmrdt::{CmRdt, OpCounter, OpOrSet};
 use crdt_lab::{JoinSemilattice, VClock};
 use proptest::collection::vec;
 use proptest::prelude::*;
 
-// --- Мини-модель причинного broadcast ---
+// --- Small causal-broadcast model ---
 
-/// Сообщение: операция с причинной меткой источника.
+/// Message: an operation with the source's causal stamp.
 struct Message<O> {
     origin: usize,
     clock: VClock<usize>,
     op: O,
 }
 
-/// Сеть из `n` реплик с журналом всех отправленных операций.
+/// Network of `n` replicas with a log of every sent operation.
 struct CausalNet<C: CmRdt> {
     replicas: Vec<C>,
-    /// Причинные часы доставленного на каждой реплике.
+    /// Causal clocks of what has been delivered on each replica.
     clocks: Vec<VClock<usize>>,
     log: Vec<Message<C::Op>>,
-    /// Для каждой реплики — множество индексов доставленных сообщений.
+    /// For each replica, the set of indices of delivered messages.
     delivered: Vec<std::collections::BTreeSet<usize>>,
 }
 
@@ -47,8 +49,8 @@ impl<C: CmRdt + Default> CausalNet<C> {
         }
     }
 
-    /// Локальная операция: источник применяет `effect` немедленно
-    /// и рассылает операцию с текущими часами.
+    /// Local operation: the source applies `effect` immediately and
+    /// broadcasts the operation with the current clock.
     fn local(&mut self, r: usize, op: C::Op) {
         self.clocks[r].increment(r);
         self.replicas[r].effect(&op);
@@ -60,8 +62,8 @@ impl<C: CmRdt + Default> CausalNet<C> {
         });
     }
 
-    /// Условие причинного broadcast: следующее по порядку сообщение
-    /// источника, все чужие предшественники уже доставлены.
+    /// Causal-broadcast condition: the next-in-order message of the
+    /// source, with all foreign predecessors already delivered.
     fn admissible(&self, r: usize, i: usize) -> bool {
         if self.delivered[r].contains(&i) {
             return false;
@@ -80,7 +82,7 @@ impl<C: CmRdt + Default> CausalNet<C> {
     }
 
     fn deliver(&mut self, r: usize, i: usize) {
-        assert!(self.admissible(r, i), "доставка вне причинного порядка");
+        assert!(self.admissible(r, i), "delivery outside causal order");
         let op = self.log[i].op.clone();
         let clock = self.log[i].clock.clone();
         self.replicas[r].effect(&op);
@@ -88,8 +90,8 @@ impl<C: CmRdt + Default> CausalNet<C> {
         self.delivered[r].insert(i);
     }
 
-    /// Доставить всё оставшееся в псевдослучайном причинно допустимом
-    /// порядке, определяемом `seed`.
+    /// Deliver everything remaining in a pseudo-random causally
+    /// admissible order determined by `seed`.
     fn flush(&mut self, mut seed: u64) {
         loop {
             let mut progress = false;
@@ -114,11 +116,12 @@ impl<C: CmRdt + Default> CausalNet<C> {
     }
 }
 
-// --- OpCounter: порядок доставки безразличен ---
+// --- OpCounter: delivery order does not matter ---
 
 proptest! {
-    /// `effect` счётчика коммутирует безусловно: любые перестановки
-    /// одного набора операций дают одно состояние (причинность не нужна).
+    /// The counter's `effect` commutes unconditionally: any
+    /// permutation of the same set of operations yields the same
+    /// state (causality is not needed).
     #[test]
     fn opcounter_converges_under_any_delivery_order(
         (deltas, shuffled) in vec(-5i64..=5, 1..16)
@@ -136,14 +139,15 @@ proptest! {
     }
 }
 
-// --- OpOrSet: сходимость при причинной доставке ---
+// --- OpOrSet: convergence under causal delivery ---
 
-/// Шаг случайной истории: локальная операция или доставка.
+/// Step of a random history: a local operation or a delivery.
 #[derive(Debug, Clone)]
 enum Cmd {
     Add(u8, u8),
     Remove(u8, u8),
-    /// Доставить на реплику один из допустимых пакетов (выбор по модулю).
+    /// Deliver to a replica one of the admissible packets (choice by
+    /// modulus).
     Deliver(u8, u8),
 }
 
@@ -159,8 +163,8 @@ fn cmds() -> impl Strategy<Value = Vec<Cmd>> {
 }
 
 proptest! {
-    /// Любая история операций и любой причинно допустимый порядок
-    /// доставки приводят все реплики в одно состояние.
+    /// Any history of operations and any causally admissible delivery
+    /// order bring all replicas into one state.
     #[test]
     fn op_orset_converges_under_causal_delivery(cmds in cmds(), seed in any::<u64>()) {
         let mut net: CausalNet<OpOrSet<usize, u8>> = CausalNet::new(3);
@@ -190,49 +194,50 @@ proptest! {
     }
 }
 
-/// Add-wins сохраняется и в op-based варианте: конкурентная вставка
-/// несёт метку, которой удаление не наблюдало.
+/// Add-wins is preserved in the op-based variant: a concurrent
+/// insertion carries a tag that the removal did not observe.
 #[test]
 fn op_orset_add_wins_under_causal_delivery() {
     let mut net: CausalNet<OpOrSet<usize, &str>> = CausalNet::new(2);
     let add = net.replicas[0].prepare_add(0, "x");
     net.local(0, add);
-    net.deliver(1, 0); // реплика 1 наблюдает вставку…
+    net.deliver(1, 0); // replica 1 observes the insertion…
     let rem = net.replicas[1].prepare_remove(&"x");
-    net.local(1, rem); // …и удаляет её
-    let readd = net.replicas[0].prepare_add(0, "x"); // конкурентная вставка
+    net.local(1, rem); // …and removes it
+    let readd = net.replicas[0].prepare_add(0, "x"); // concurrent insertion
     net.local(0, readd);
     net.flush(42);
     assert!(net.all_converged());
     assert!(net.replicas[0].contains(&"x")); // add-wins
 }
 
-// --- Контр-тест: без причинной доставки op-based OR-Set расходится ---
+// --- Counter-test: without causal delivery an op-based OR-Set diverges ---
 
-/// Одна и та же пара операций, доставленная в разном порядке, разводит
-/// реплики навсегда: `Remove` раньше «своего» `Add` удаляет пустоту,
-/// а затем `Add` воскрешает элемент. У state-based OR-Set такой сценарий
-/// невозможен: надгробие — часть растущего состояния, и `⊔` идемпотентен
-/// и коммутативен для любых порядков слияния.
+/// The same pair of operations, delivered in a different order,
+/// diverges the replicas forever: `Remove` before "its" `Add` deletes
+/// nothing, and then `Add` resurrects the element. For a state-based
+/// OR-Set that scenario is impossible: the tombstone is part of
+/// growing state, and `⊔` is idempotent and commutative for any merge
+/// orders.
 #[test]
 fn op_orset_without_causal_delivery_diverges() {
     let mut source: OpOrSet<u8, &str> = OpOrSet::new();
     let add = source.prepare_add(0, "x");
     source.effect(&add);
-    let rem = source.prepare_remove(&"x"); // причинно следует за add
+    let rem = source.prepare_remove(&"x"); // causally follows add
     source.effect(&rem);
 
-    // Причинный порядок: add, затем rem — совпадает с источником.
+    // Causal order: add, then rem — matches the source.
     let mut causal: OpOrSet<u8, &str> = OpOrSet::new();
     causal.effect(&add);
     causal.effect(&rem);
     assert_eq!(causal, source);
     assert!(!causal.contains(&"x"));
 
-    // Нарушенный порядок: rem доставлен раньше add.
+    // Broken order: rem delivered before add.
     let mut reordered: OpOrSet<u8, &str> = OpOrSet::new();
-    reordered.effect(&rem); // удалять нечего
-    reordered.effect(&add); // элемент «воскресает»
+    reordered.effect(&rem); // nothing to delete
+    reordered.effect(&add); // the element is "resurrected"
     assert!(reordered.contains(&"x"));
-    assert_ne!(causal, reordered); // один набор операций — разные состояния
+    assert_ne!(causal, reordered); // one set of operations, different states
 }

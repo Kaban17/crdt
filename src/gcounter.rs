@@ -1,20 +1,20 @@
-//! G-Counter — растущий (grow-only) распределённый счётчик.
+//! G-Counter: a grow-only distributed counter.
 
 use std::collections::BTreeMap;
 
 use crate::lattice::{Actor, JoinSemilattice, Update};
 
-/// Растущий счётчик: каждая реплика увеличивает только *свою* компоненту,
-/// итоговое значение — сумма всех компонент.
+/// Grow-only counter: each replica increments only *its own* component;
+/// the observed value is the sum of all components.
 ///
-/// Состояние — отображение `актор → личный вклад`; полурешётка — та же,
-/// что у векторных часов (покомпонентный максимум). Корректность слияния
-/// опирается на инвариант «компоненту актора `a` увеличивает только сама
-/// реплика `a`», поэтому её компонента на любой реплике — это устаревшее
-/// (меньшее либо равное) значение истинного вклада, и `max` его
-/// восстанавливает.
+/// State is a map `actor → personal contribution`; the semilattice is
+/// the same as for vector clocks (componentwise maximum). Correctness
+/// of merge rests on the invariant "actor `a`'s component is increased
+/// only by replica `a`", so that component on any other replica is a
+/// stale (smaller or equal) value of the true contribution, and `max`
+/// restores it.
 ///
-/// # Пример
+/// # Example
 ///
 /// ```
 /// use crdt_lab::{GCounter, CvRdt};
@@ -27,7 +27,7 @@ use crate::lattice::{Actor, JoinSemilattice, Update};
 ///
 /// a.merge(&b);
 /// b.merge(&a);
-/// assert_eq!(a, b);          // сходимость
+/// assert_eq!(a, b);          // convergence
 /// assert_eq!(a.value(), 3);  // 1 + 2
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -36,36 +36,36 @@ pub struct GCounter<A: Actor> {
 }
 
 impl<A: Actor> GCounter<A> {
-    /// Нулевой счётчик — наименьший элемент полурешётки.
+    /// Zero counter: the least element of the semilattice.
     pub fn new() -> Self {
         Self {
             counts: BTreeMap::new(),
         }
     }
 
-    /// Увеличить вклад актора на 1. Инфляционное обновление.
+    /// Increase the actor's contribution by 1. Inflationary update.
     pub fn increment(&mut self, actor: A) {
         self.increment_by(actor, 1);
     }
 
-    /// Увеличить вклад актора на `amount`. Инфляционное обновление.
+    /// Increase the actor's contribution by `amount`. Inflationary update.
     pub fn increment_by(&mut self, actor: A, amount: u64) {
         *self.counts.entry(actor).or_insert(0) += amount;
     }
 
-    /// Текущее значение счётчика: сумма вкладов всех акторов.
+    /// Current counter value: sum of all actors' contributions.
     pub fn value(&self) -> u64 {
         self.counts.values().sum()
     }
 
-    /// Вклад отдельного актора (0, если актор ещё не наблюдался).
+    /// Contribution of a single actor (0 if the actor has not been observed).
     pub fn get(&self, actor: &A) -> u64 {
         self.counts.get(actor).copied().unwrap_or(0)
     }
 }
 
 impl<A: Actor> JoinSemilattice for GCounter<A> {
-    /// Покомпонентный максимум вкладов.
+    /// Componentwise maximum of contributions.
     fn join(&mut self, other: &Self) {
         for (actor, &n) in &other.counts {
             let e = self.counts.entry(actor.clone()).or_insert(0);
@@ -75,7 +75,7 @@ impl<A: Actor> JoinSemilattice for GCounter<A> {
 }
 
 impl<A: Actor> Update for GCounter<A> {
-    /// Операция — пара «актор, величина инкремента».
+    /// Operation: pair "actor, increment amount".
     type Op = (A, u64);
 
     fn apply(&mut self, (actor, amount): Self::Op) {
@@ -92,7 +92,7 @@ mod tests {
         let mut a = GCounter::new();
         a.increment("a");
         let b = a.clone();
-        // повторная доставка того же состояния не меняет значения
+        // redelivering the same state does not change the value
         let merged = a.clone().joined(&b).joined(&b);
         assert_eq!(merged.value(), 1);
     }

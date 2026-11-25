@@ -2,7 +2,7 @@
 name = "crdt-wasm"
 version = "0.1.0"
 edition = "2021"
-description = "WebAssembly-биндинги crdt-lab для интерактивной демонстрации (web/)"
+description = "WebAssembly bindings of crdt-lab for the interactive demo (web/)"
 license = "MIT OR Apache-2.0"
 
 [lib]

@@ -1,43 +1,44 @@
-//! LWW-Register — регистр «последняя запись побеждает».
+//! LWW-Register: last-writer-wins register.
 
 use std::fmt;
 
 use crate::lattice::{Actor, JoinSemilattice, Update, ValidateMerge};
 
-/// Регистр, разрешающий конфликты по принципу *last-writer-wins*.
+/// Register that resolves conflicts by *last-writer-wins*.
 ///
-/// Состояние — тройка `(timestamp, actor, value)`; `join` выбирает
-/// лексикографически бóльшую тройку. Лексикографический порядок на
-/// произведении **линейных** порядков линеен, а `max` в линейном порядке —
-/// это `join` полурешётки, так что законы выполняются автоматически.
+/// State is a triple `(timestamp, actor, value)`; `join` picks the
+/// lexicographically larger triple. The lexicographic order on a
+/// product of **linear** orders is linear, and `max` in a linear order
+/// is the join of a semilattice, so the laws hold automatically.
 ///
-/// Разрешение конфликтов детерминировано на уровне типов:
+/// Conflict resolution is deterministic at the type level:
 ///
-/// * при равных метках времени побеждает больший идентификатор актора
-///   (`A: Ord` требует система типов — регистр с несравнимыми акторами
-///   просто не скомпилируется);
-/// * запасной третий компонент `T: Ord` делает `join` тотальным даже при
-///   нарушении протокольного инварианта «пара `(timestamp, actor)`
-///   уникальна» — законы полурешётки верны для *любых* состояний, что
-///   упрощает и усиливает property-based тесты.
+/// * on equal timestamps the larger actor identifier wins
+///   (`A: Ord` is required by the type system: a register with
+///   incomparable actors simply does not compile);
+/// * a fallback third component `T: Ord` makes `join` total even when
+///   the protocol invariant "the pair `(timestamp, actor)` is unique"
+///   is broken. The semilattice laws hold for *any* states, which
+///   simplifies and strengthens the property-based tests.
 ///
-/// Семантическая цена LWW — потерянные обновления: из конкурентных записей
-/// выживает одна. Это свойство типа, а не дефект реализации.
+/// The semantic cost of LWW is lost updates: of concurrent writes,
+/// only one survives. That is a property of the type, not a defect of
+/// the implementation.
 ///
-/// # Пример
+/// # Example
 ///
 /// ```
 /// use crdt_lab::{LwwRegister, CvRdt};
 ///
-/// let mut a = LwwRegister::new("a", "черновик");
+/// let mut a = LwwRegister::new("a", "draft");
 /// let mut b = a.clone();
-/// a.write(1, "a", "версия A");
-/// b.write(2, "b", "версия B");
+/// a.write(1, "a", "version A");
+/// b.write(2, "b", "version B");
 ///
 /// a.merge(&b);
 /// b.merge(&a);
 /// assert_eq!(a, b);
-/// assert_eq!(*a.value(), "версия B"); // большая метка времени победила
+/// assert_eq!(*a.value(), "version B"); // larger timestamp won
 /// ```
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LwwRegister<A: Actor, T: Ord + Clone> {
@@ -47,7 +48,7 @@ pub struct LwwRegister<A: Actor, T: Ord + Clone> {
 }
 
 impl<A: Actor, T: Ord + Clone> LwwRegister<A, T> {
-    /// Регистр с начальным значением и меткой времени 0.
+    /// Register with an initial value and timestamp 0.
     pub fn new(actor: A, value: T) -> Self {
         Self {
             timestamp: 0,
@@ -56,26 +57,26 @@ impl<A: Actor, T: Ord + Clone> LwwRegister<A, T> {
         }
     }
 
-    /// Текущее значение.
+    /// Current value.
     pub fn value(&self) -> &T {
         &self.value
     }
 
-    /// Метка времени текущего значения.
+    /// Timestamp of the current value.
     pub fn timestamp(&self) -> u64 {
         self.timestamp
     }
 
-    /// Актор, установивший текущее значение.
+    /// Actor that set the current value.
     pub fn actor(&self) -> &A {
         &self.actor
     }
 
-    /// Записать значение с меткой времени.
+    /// Write a value with a timestamp.
     ///
-    /// Реализована как `join` с одноэлементным состоянием, поэтому
-    /// инфляционность выполняется по построению: «устаревшая» запись
-    /// (с меньшей тройкой) просто не изменит регистр.
+    /// Implemented as `join` with a singleton state, so inflation holds
+    /// by construction: a stale write (with a smaller triple) simply
+    /// does not change the register.
     pub fn write(&mut self, timestamp: u64, actor: A, value: T) {
         self.join(&Self {
             timestamp,
@@ -84,17 +85,17 @@ impl<A: Actor, T: Ord + Clone> LwwRegister<A, T> {
         });
     }
 
-    /// Ключ сравнения состояний.
+    /// Comparison key of the state.
     fn key(&self) -> (u64, &A, &T) {
         (self.timestamp, &self.actor, &self.value)
     }
 }
 
-/// Начальное состояние из значений по умолчанию (метка времени 0).
+/// Initial state from default values (timestamp 0).
 ///
-/// Нужен обобщённому коду (например, свёртке операций в тестах);
-/// наименьшим элементом решётки в общем случае **не** является,
-/// поскольку `A::default()`/`T::default()` не обязаны быть минимумами.
+/// Needed by generic code (for example, folding operations in tests).
+/// It is **not** in general the least element of the lattice, because
+/// `A::default()`/`T::default()` need not be minima.
 impl<A: Actor + Default, T: Ord + Clone + Default> Default for LwwRegister<A, T> {
     fn default() -> Self {
         Self::new(A::default(), T::default())
@@ -102,7 +103,7 @@ impl<A: Actor + Default, T: Ord + Clone + Default> Default for LwwRegister<A, T>
 }
 
 impl<A: Actor, T: Ord + Clone> Update for LwwRegister<A, T> {
-    /// Операция — тройка «метка времени, актор, значение».
+    /// Operation: triple "timestamp, actor, value".
     type Op = (u64, A, T);
 
     fn apply(&mut self, (timestamp, actor, value): Self::Op) {
@@ -111,7 +112,7 @@ impl<A: Actor, T: Ord + Clone> Update for LwwRegister<A, T> {
 }
 
 impl<A: Actor, T: Ord + Clone> JoinSemilattice for LwwRegister<A, T> {
-    /// Максимум по лексикографическому порядку `(timestamp, actor, value)`.
+    /// Maximum in the lexicographic order `(timestamp, actor, value)`.
     fn join(&mut self, other: &Self) {
         if self.key() < other.key() {
             self.clone_from(other);
@@ -119,20 +120,21 @@ impl<A: Actor, T: Ord + Clone> JoinSemilattice for LwwRegister<A, T> {
     }
 }
 
-/// Нарушение инварианта LWW: пара `(timestamp, actor)` переиспользована
-/// для разных значений.
+/// Violation of the LWW invariant: the pair `(timestamp, actor)` was
+/// reused for different values.
 ///
-/// Протокол LWW предполагает, что метки записей уникальны (каждый актор
-/// не выдаёт один `timestamp` дважды). При нарушении `join` остаётся
-/// корректной операцией полурешётки, но «победитель» выбирается запасным
-/// сравнением значений — то есть произвольно с точки зрения семантики.
+/// The LWW protocol assumes write stamps are unique (an actor never
+/// issues the same `timestamp` twice). When that is broken, `join`
+/// remains a correct semilattice operation, but the "winner" is chosen
+/// by the fallback comparison of values, i.e. arbitrarily from the
+/// point of view of the intended semantics.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MergeError<A: Actor, T: Ord + Clone> {
-    /// Переиспользованная метка времени.
+    /// Reused timestamp.
     pub timestamp: u64,
-    /// Актор, выдавший метку дважды.
+    /// Actor that issued the stamp twice.
     pub actor: A,
-    /// Противоречащие значения обоих состояний.
+    /// Conflicting values of the two states.
     pub values: (T, T),
 }
 
@@ -140,7 +142,7 @@ impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> fmt::Display for MergeE
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "метка (timestamp {}, actor {:?}) переиспользована: значения {:?} и {:?}",
+            "stamp (timestamp {}, actor {:?}) reused: values {:?} and {:?}",
             self.timestamp, self.actor, self.values.0, self.values.1
         )
     }
@@ -151,8 +153,8 @@ impl<A: Actor + fmt::Debug, T: Ord + Clone + fmt::Debug> std::error::Error for M
 impl<A: Actor, T: Ord + Clone> ValidateMerge for LwwRegister<A, T> {
     type Error = MergeError<A, T>;
 
-    /// Ошибка, если оба состояния несут одну пару `(timestamp, actor)`
-    /// с разными значениями.
+    /// Error if both states carry the same pair `(timestamp, actor)`
+    /// with different values.
     fn validate_merge(&self, other: &Self) -> Result<(), Self::Error> {
         if self.timestamp == other.timestamp
             && self.actor == other.actor
@@ -176,7 +178,7 @@ mod tests {
     fn later_timestamp_wins() {
         let mut r = LwwRegister::new("a", 0);
         r.write(5, "a", 42);
-        r.write(3, "b", 7); // устаревшая запись игнорируется
+        r.write(3, "b", 7); // stale write is ignored
         assert_eq!(*r.value(), 42);
     }
 

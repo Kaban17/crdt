@@ -1,31 +1,32 @@
-//! Op-based модель — CmRDT (commutative replicated data type).
+//! Op-based model: CmRDT (commutative replicated data type).
 //!
-//! Второй класс CRDT по Shapiro et al.: реплики обмениваются не
-//! состояниями, а **операциями**. Обновление двухфазно:
+//! The second class of CRDT in Shapiro et al.: replicas exchange
+//! **operations**, not states. An update is two-phase:
 //!
-//! 1. *prepare* — выполняется только на источнике, читает локальное
-//!    состояние и изготавливает операцию (например, снабжает вставку
-//!    свежей меткой);
-//! 2. *effect* — применяется на **каждой** реплике, включая источник.
+//! 1. *prepare* runs only at the source, reads local state, and
+//!    produces an operation (for example, tagging an insertion with a
+//!    fresh identifier);
+//! 2. *effect* is applied on **every** replica, including the source.
 //!
-//! Сходимость требует, чтобы `effect` конкурентных операций коммутировал,
-//! **и** чтобы транспорт доставлял операции в причинном порядке и ровно
-//! один раз. Контраст с CvRDT — центральный для сравнительной главы:
+//! Convergence requires that `effect` of concurrent operations
+//! commutes, **and** that the transport delivers operations in causal
+//! order and exactly once. Contrast with CvRDT:
 //!
-//! * законы полурешётки (ACI) — свойства *типа*, проверяемые обобщённо
-//!   для любого `T: JoinSemilattice`; идемпотентность `⊔` прощает
-//!   транспорту дубли и пересечения состояний;
-//! * предпосылки op-based модели — свойства *транспорта*: причинную
-//!   доставку и exactly-once нельзя навесить на тип операции трейтом,
-//!   в сигнатуре [`CmRdt::effect`] их просто негде записать. Это честная
-//!   граница подхода «спецификация в типах» (мост к Propel/VeriFx,
-//!   где предпосылки доставки — часть верифицируемой спецификации).
+//! * the semilattice laws (ACI) are properties of the *type*, checked
+//!   generically for any `T: JoinSemilattice`; idempotence of `⊔`
+//!   forgives duplicates and overlapping states in the transport;
+//! * the hypotheses of the op-based model are properties of the
+//!   *transport*: causal delivery and exactly-once cannot be attached
+//!   to the operation type by a trait; there is nowhere to write them
+//!   in the signature of [`CmRdt::effect`]. That is a genuine limit of
+//!   putting the specification in types (cf. Propel/VeriFx, where
+//!   delivery hypotheses are part of the verified specification).
 //!
-//! `prepare`-фаза остаётся методами конкретных типов
-//! ([`OpOrSet::prepare_add`] и т.п.): её сигнатура типоспецифична,
-//! общего трейта для неё нет.
+//! The `prepare` phase stays as methods of concrete types
+//! ([`OpOrSet::prepare_add`] and so on): its signature is
+//! type-specific, and there is no shared trait for it.
 //!
-//! Модель причинного broadcast и тесты сходимости/расходимости —
+//! The causal-broadcast model and convergence/divergence tests live in
 //! `tests/cmrdt.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,56 +34,56 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::lattice::Actor;
 use crate::orset::Dot;
 
-/// Операционный (op-based) CRDT: фаза *effect*.
+/// Operation-based CRDT: the *effect* phase.
 ///
-/// # Контракт (проверяется тестами, не компилятором)
+/// # Contract (checked by tests, not by the compiler)
 ///
-/// Для операций `p`, `q`, изготовленных **конкурентно** (ни одна не
-/// наблюдала другую): `effect(effect(s, p), q) = effect(effect(s, q), p)`.
+/// For operations `p`, `q` produced **concurrently** (neither observed
+/// the other): `effect(effect(s, p), q) = effect(effect(s, q), p)`.
 ///
-/// Для причинно упорядоченных операций коммутативность не требуется —
-/// но тогда корректность зависит от предположения, что транспорт
-/// доставляет их в причинном порядке (см. контр-тест расходимости в
-/// `tests/cmrdt.rs`). В отличие от [`JoinSemilattice::join`]
-/// (идемпотентного), `effect` в общем случае не идемпотентен:
-/// повторная доставка — тоже обязанность транспорта.
+/// For causally ordered operations commutativity is not required, but
+/// then correctness depends on the assumption that the transport
+/// delivers them in causal order (see the divergence counter-test in
+/// `tests/cmrdt.rs`). Unlike [`JoinSemilattice::join`] (which is
+/// idempotent), `effect` is in general not idempotent: redelivery is
+/// also the transport's job.
 ///
 /// [`JoinSemilattice::join`]: crate::JoinSemilattice::join
 pub trait CmRdt: Clone + Eq {
-    /// Тип передаваемой операции.
+    /// Type of the transmitted operation.
     type Op: Clone;
 
-    /// Применить доставленную операцию к состоянию.
+    /// Apply a delivered operation to the state.
     fn effect(&mut self, op: &Self::Op);
 }
 
-/// Op-based счётчик: простейший CmRDT.
+/// Op-based counter: the simplest CmRDT.
 ///
-/// Операция — целочисленная дельта; сложение коммутативно и без
-/// предположений о конкурентности, поэтому счётчик сходится при *любом*
-/// порядке доставки — причинный broadcast ему не нужен (но exactly-once
-/// нужен по-прежнему: `+δ` не идемпотентно). Сравните с [`OpOrSet`],
-/// где коммутативность держится только на причинной доставке.
+/// The operation is an integer delta; addition commutes with no
+/// assumptions about concurrency, so the counter converges under
+/// *any* delivery order. Causal broadcast is not needed (exactly-once
+/// still is: `+δ` is not idempotent). Compare with [`OpOrSet`], where
+/// commutativity rests only on causal delivery.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct OpCounter {
     value: i64,
 }
 
 impl OpCounter {
-    /// Нулевой счётчик.
+    /// Zero counter.
     pub fn new() -> Self {
         Self { value: 0 }
     }
 
-    /// Текущее значение.
+    /// Current value.
     pub fn value(&self) -> i64 {
         self.value
     }
 
-    /// Фаза *prepare*: изготовить операцию-дельту.
+    /// *prepare* phase: produce a delta operation.
     ///
-    /// Состояние не читается — вырожденный случай, объясняющий, почему
-    /// счётчику безразличен порядок доставки.
+    /// The state is not read: a degenerate case that explains why the
+    /// counter does not care about delivery order.
     pub fn prepare(&self, delta: i64) -> i64 {
         delta
     }
@@ -96,53 +97,57 @@ impl CmRdt for OpCounter {
     }
 }
 
-/// Операция над [`OpOrSet`].
+/// Operation on an [`OpOrSet`].
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Op<A: Actor, T> {
-    /// Вставка: элемент со свежей меткой, выданной `prepare`-фазой источника.
+    /// Insertion: an element with a fresh tag issued by the source's
+    /// `prepare` phase.
     Add {
-        /// Свежая уникальная метка вставки.
+        /// Fresh unique insertion tag.
         dot: Dot<A>,
-        /// Вставляемый элемент.
+        /// Element being inserted.
         item: T,
     },
-    /// Удаление: множество меток, *наблюдавшихся* у элемента на источнике.
+    /// Removal: the set of tags *observed* for the element at the source.
     Remove {
-        /// Наблюдённые на источнике метки вставок элемента.
+        /// Insertion tags of the element observed at the source.
         dots: BTreeSet<Dot<A>>,
-        /// Удаляемый элемент.
+        /// Element being removed.
         item: T,
     },
 }
 
 /// Op-based OR-Set (add-wins).
 ///
-/// В отличие от state-based [`OrSet`](crate::OrSet), надгробия не нужны:
-/// `Remove` несёт явный список наблюдённых меток, и `effect` физически
-/// удаляет их. Add-wins получается так же, как в state-based варианте:
-/// конкурентная вставка несёт метку, которой удаление не наблюдало.
+/// Unlike the state-based [`OrSet`](crate::OrSet), tombstones are not
+/// needed: `Remove` carries an explicit list of observed tags, and
+/// `effect` deletes them physically. Add-wins is obtained the same way
+/// as in the state-based variant: a concurrent insertion carries a tag
+/// that the removal did not observe.
 ///
-/// Цена — коммутативность `effect` держится на **причинной доставке**:
-/// если `Remove(d)` доставлен раньше, чем породивший `d` `Add`, удаление
-/// пройдёт вхолостую, а затем `Add` «воскресит» элемент — реплики
-/// разойдутся навсегда (контр-тест в `tests/cmrdt.rs`). У state-based
-/// OR-Set эта ситуация невозможна по построению: надгробие — часть
-/// растущего состояния, `⊔` переживает любой порядок слияний.
+/// The cost is that commutativity of `effect` rests on **causal
+/// delivery**: if `Remove(d)` is delivered before the `Add` that
+/// produced `d`, the removal is a no-op, and then `Add` "resurrects"
+/// the element. Replicas diverge forever (counter-test in
+/// `tests/cmrdt.rs`). For a state-based OR-Set that situation is
+/// impossible by construction: the tombstone is part of growing state,
+/// and `⊔` survives any order of merges.
 ///
-/// Модель предполагает, что источник немедленно применяет `effect`
-/// изготовленной операции к себе (доставка себе мгновенна); `prepare_add`
-/// без промежуточного `effect` выдаст повторную метку.
+/// The model assumes the source immediately applies `effect` of a
+/// prepared operation to itself (self-delivery is instant);
+/// `prepare_add` without an intervening `effect` would issue a
+/// duplicate tag.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct OpOrSet<A: Actor, T: Ord + Clone> {
-    /// Живые метки вставок каждого элемента (пустых записей нет).
+    /// Live insertion tags of each element (no empty entries).
     entries: BTreeMap<T, BTreeSet<Dot<A>>>,
-    /// Максимальный виденный номер метки каждого актора — база
-    /// `prepare`-фазы для выдачи свежих меток.
+    /// Highest tag number seen for each actor: the base of the
+    /// `prepare` phase when issuing fresh tags.
     counters: BTreeMap<A, u64>,
 }
 
 impl<A: Actor, T: Ord + Clone> OpOrSet<A, T> {
-    /// Пустое множество.
+    /// Empty set.
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -150,7 +155,8 @@ impl<A: Actor, T: Ord + Clone> OpOrSet<A, T> {
         }
     }
 
-    /// Фаза *prepare* вставки: снабдить элемент свежей меткой актора.
+    /// *prepare* phase of insertion: tag the element with a fresh actor
+    /// identifier.
     pub fn prepare_add(&self, actor: A, item: T) -> Op<A, T> {
         let next = self.counters.get(&actor).copied().unwrap_or(0) + 1;
         Op::Add {
@@ -159,7 +165,8 @@ impl<A: Actor, T: Ord + Clone> OpOrSet<A, T> {
         }
     }
 
-    /// Фаза *prepare* удаления: собрать наблюдаемые метки элемента.
+    /// *prepare* phase of removal: collect the observed tags of the
+    /// element.
     pub fn prepare_remove(&self, item: &T) -> Op<A, T> {
         Op::Remove {
             dots: self.entries.get(item).cloned().unwrap_or_default(),
@@ -167,22 +174,22 @@ impl<A: Actor, T: Ord + Clone> OpOrSet<A, T> {
         }
     }
 
-    /// Присутствует ли элемент.
+    /// Whether the element is present.
     pub fn contains(&self, item: &T) -> bool {
         self.entries.contains_key(item)
     }
 
-    /// Итератор по присутствующим элементам в возрастающем порядке.
+    /// Iterator over present elements in ascending order.
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.entries.keys()
     }
 
-    /// Число присутствующих элементов.
+    /// Number of present elements.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Пусто ли множество.
+    /// Whether the set is empty.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -245,6 +252,6 @@ mod tests {
         let first = s.prepare_add("a", 1);
         s.effect(&first);
         let second = s.prepare_add("a", 1);
-        assert_ne!(first, second); // метки различны, состояние их различает
+        assert_ne!(first, second); // tags differ; the state distinguishes them
     }
 }

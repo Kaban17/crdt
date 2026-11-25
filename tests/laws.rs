@@ -1,19 +1,18 @@
-//! Обобщённая проверка законов полурешётки соединения.
+//! Generic checks of the join-semilattice laws.
 //!
-//! Центральный методический приём работы: законы записаны **один раз**
-//! для произвольного `T: JoinSemilattice` (функции `assert_*`), а макрос
-//! `lattice_laws!` инстанцирует их для каждой реализации. Добавление
-//! нового CRDT в библиотеку требует одной строки в этом файле — всё
-//! остальное делает система типов.
+//! The laws are written **once** for an arbitrary `T: JoinSemilattice`
+//! (the `assert_*` functions), and the `lattice_laws!` macro
+//! instantiates them for each implementation. Adding a new CRDT to the
+//! library takes one line in this file; the type system does the rest.
 //!
-//! Проверяются:
-//! * ассоциативность, коммутативность, идемпотентность `⊔`;
-//! * инфляционность слияния (`a ≤ a ⊔ b`) и свойство точной верхней
-//!   грани (`a ≤ c ∧ b ≤ c ⇒ a ⊔ b ≤ c`);
-//! * согласованность выводимого порядка (рефлексивность, транзитивность,
-//!   антисимметричность);
-//! * инфляционность локальных операций (`a ≤ apply(a, op)`) — обобщённо
-//!   через `Update::Op` (макрос `inflation_law!`).
+//! Checked:
+//! * associativity, commutativity, idempotence of `⊔`;
+//! * inflation of merge (`a ≤ a ⊔ b`) and the least-upper-bound
+//!   property (`a ≤ c ∧ b ≤ c ⇒ a ⊔ b ≤ c`);
+//! * consistency of the derived order (reflexivity, transitivity,
+//!   antisymmetry);
+//! * inflation of local operations (`a ≤ apply(a, op)`), generically
+//!   via `Update::Op` (macro `inflation_law!`).
 
 mod common;
 
@@ -36,33 +35,34 @@ fn assert_idempotent<T: JoinSemilattice + std::fmt::Debug>(a: &T) {
 
 fn assert_join_is_lub<T: JoinSemilattice + std::fmt::Debug>(a: &T, b: &T, c: &T) {
     let ab = a.clone().joined(b);
-    // верхняя грань
+    // upper bound
     assert!(a.leq(&ab), "a ≰ a ⊔ b");
     assert!(b.leq(&ab), "b ≰ a ⊔ b");
-    // точная: любая верхняя грань c мажорирует a ⊔ b
+    // least: any upper bound c dominates a ⊔ b
     let upper = c.clone().joined(a).joined(b);
-    assert!(ab.leq(&upper), "a ⊔ b ≰ верхней грани");
+    assert!(ab.leq(&upper), "a ⊔ b ≰ upper bound");
 }
 
 fn assert_partial_order<T: JoinSemilattice + std::fmt::Debug>(a: &T, b: &T, c: &T) {
-    assert!(a.leq(a), "порядок не рефлексивен");
+    assert!(a.leq(a), "order is not reflexive");
     if a.leq(b) && b.leq(c) {
-        assert!(a.leq(c), "порядок не транзитивен");
+        assert!(a.leq(c), "order is not transitive");
     }
     if a.leq(b) && b.leq(a) {
-        assert_eq!(a, b, "порядок не антисимметричен");
+        assert_eq!(a, b, "order is not antisymmetric");
     }
 }
 
-/// Инфляционность операции: `a ≤ apply(a, op)` — второе условие
-/// теоремы о сходимости CvRDT, обобщённое благодаря `Update::Op`.
+/// Inflation of an operation: `a ≤ apply(a, op)` is the second
+/// hypothesis of the CvRDT convergence theorem, made generic through
+/// `Update::Op`.
 fn assert_inflationary<T: Update + std::fmt::Debug>(state: &T, op: T::Op)
 where
     T::Op: std::fmt::Debug + Clone,
 {
     let mut after = state.clone();
     after.apply(op.clone());
-    assert!(state.leq(&after), "операция {op:?} не инфляционна");
+    assert!(state.leq(&after), "operation {op:?} is not inflationary");
 }
 
 macro_rules! inflation_law {
