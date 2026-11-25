@@ -1,4 +1,4 @@
-# Непрерывная интеграция: форматирование, линтер, тесты, документация.
+# Continuous integration: formatting, lints, tests, docs.
 name: CI
 
 on:
@@ -11,37 +11,36 @@ env:
 
 jobs:
   test:
-    name: Тесты (stable)
+    name: Tests (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Установка Rust
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Кэш сборки
+      - name: Build cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Форматирование
+      - name: Formatting
         run: cargo fmt --check
 
-      - name: Clippy (предупреждения = ошибки)
+      - name: Clippy (warnings as errors)
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Тесты (юнит + property-based + doc)
+      - name: Tests (unit + property-based + doc)
         run: cargo test
 
-      - name: Документация (предупреждения = ошибки)
+      - name: Docs (warnings as errors)
         run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
-  # Проверка на минимальной поддерживаемой версии Rust — полезная строка
-  # в разделе о воспроизводимости.
+  # Check on the minimum supported Rust version.
   msrv:
-    name: Тесты (MSRV 1.85)
+    name: Tests (MSRV 1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
